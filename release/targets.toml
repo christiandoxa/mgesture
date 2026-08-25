@@ -1,0 +1,92 @@
+# Canonical standalone release target matrix. Publish only rows with publishable = true.
+schema_version = 1
+
+[[target]]
+name = "x86_64-unknown-linux-gnu"
+runner = "ubuntu-24.04"
+architecture = "x86_64"
+os = "linux"
+asset = "mgesture-x86_64-unknown-linux-gnu.tar.gz"
+format = "tar.gz"
+python = "3.11"
+mojo_engine = false
+implementation = "python-reference"
+python_fallback = true
+mediapipe = true
+native_smoke = true
+minimum_glibc = "2.38"
+publishable = true
+status = "buildable-on-linux; hardware validation pending"
+notes = "CPU fallback is complete; Mojo is not bundled until a compiler-free redistributable extension build is verified."
+
+[[target]]
+name = "aarch64-unknown-linux-gnu"
+runner = "ubuntu-24.04-arm"
+architecture = "aarch64"
+os = "linux"
+asset = "mgesture-aarch64-unknown-linux-gnu.tar.gz"
+format = "tar.gz"
+python = "3.11"
+mojo_engine = false
+implementation = "python-reference"
+python_fallback = true
+mediapipe = false
+native_smoke = false
+minimum_glibc = "unknown"
+publishable = false
+status = "blocked"
+notes = "MediaPipe/PyInstaller dependency support and native smoke target require verification before publishing."
+
+[[target]]
+name = "x86_64-apple-darwin"
+runner = "macos-13"
+architecture = "x86_64"
+os = "macos"
+asset = "mgesture-x86_64-apple-darwin.tar.gz"
+format = "tar.gz"
+python = "3.11"
+mojo_engine = false
+implementation = "python-reference"
+python_fallback = true
+mediapipe = false
+native_smoke = false
+minimum_glibc = "n/a"
+publishable = false
+status = "blocked"
+notes = "Current MediaPipe wheel availability must be verified for Intel macOS."
+
+[[target]]
+name = "aarch64-apple-darwin"
+runner = "macos-14"
+architecture = "aarch64"
+os = "macos"
+asset = "mgesture-aarch64-apple-darwin.tar.gz"
+format = "tar.gz"
+python = "3.11"
+mojo_engine = false
+implementation = "python-reference"
+python_fallback = true
+mediapipe = true
+native_smoke = true
+minimum_glibc = "n/a"
+publishable = false
+status = "buildable-on-paper; hardware validation pending"
+notes = "Build, package, permissions, and standalone smoke must run on Apple Silicon before publication."
+
+[[target]]
+name = "x86_64-pc-windows-msvc"
+runner = "windows-2025"
+architecture = "x86_64"
+os = "windows"
+asset = "mgesture-x86_64-pc-windows-msvc.zip"
+format = "zip"
+python = "3.11"
+mojo_engine = false
+implementation = "python-reference"
+python_fallback = true
+mediapipe = true
+native_smoke = true
+minimum_glibc = "n/a"
+publishable = false
+status = "buildable-on-paper; native smoke pending"
+notes = "Native Windows packaging and SendInput smoke must run on a Windows host; WSL is not sufficient."

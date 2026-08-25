@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2025]
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: 0.77.1
+          cache: true
+      - name: Install environment
+        run: pixi install
+      - name: Test
+        run: pixi run test
+      - name: Lint
+        run: pixi run lint
+      - name: Format check
+        run: pixi run format
+      - name: Type check
+        run: pixi run typecheck
+      - name: Build source package
+        run: pixi run build
+      - name: Package and release metadata checks
+        run: pixi run release-check
+      - name: Confirm native Windows Mojo failure is explicit
+        if: runner.os == 'Windows'
+        run: pixi run python scripts/release/check_mojo_unavailable.py
+
+  mojo:
+    name: Mojo ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: 0.77.1
+          cache: true
+      - name: Install environment
+        run: pixi install
+      - name: Compile Mojo
+        run: pixi run mojo-build
+      - name: Mojo tests
+        run: pixi run mojo-test
+      - name: Python tests
+        run: pixi run test
+
+  release-dry-run:
+    name: Standalone Linux dry run
+    runs-on: ubuntu-24.04
+    needs: [python, mojo]
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: 0.77.1
+          cache: true
+      - name: Install environment and pinned model
+        run: |
+          pixi install
+          pixi run python -m mgesture model install
+      - name: Build and smoke standalone bundle
+        run: |
+          pixi run package-local
+          mkdir -p "$RUNNER_TEMP/mgesture-smoke"
+          tar -xzf dist/mgesture-x86_64-unknown-linux-gnu.tar.gz -C "$RUNNER_TEMP/mgesture-smoke"
+          "$RUNNER_TEMP/mgesture-smoke/mgesture/bin/mgesture" --version
+          "$RUNNER_TEMP/mgesture-smoke/mgesture/bin/mgesture" self-test --headless --fake-input

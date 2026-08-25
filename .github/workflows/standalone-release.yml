@@ -1,0 +1,194 @@
+name: Standalone release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact semantic version in src/mgesture/version.py
+        required: true
+        type: string
+      target_sha:
+        description: Exact full 40-character main commit to release
+        required: true
+        type: string
+
+concurrency:
+  group: mgesture-standalone-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PIXI_VERSION: 0.77.1
+
+jobs:
+  verify-ci:
+    name: Verify exact source and CI
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      version: ${{ steps.target.outputs.version }}
+      target_sha: ${{ steps.target.outputs.target_sha }}
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.target_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate dispatch target and version
+        id: target
+        env:
+          REQUESTED_SHA: ${{ inputs.target_sha }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = main
+          test "${GITHUB_SHA}" = "${REQUESTED_SHA}"
+          printf '%s' "${REQUESTED_SHA}" | grep -Eq '^[0-9a-f]{40}$'
+          version="$(python3 scripts/release/validate_version.py --version "${REQUESTED_VERSION}")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "target_sha=${REQUESTED_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Wait for successful CI run at exact SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            result="$(gh run list --workflow ci.yml --event push --limit 50 --json headSha,status,conclusion --jq '.[] | select(.headSha == env.TARGET_SHA) | [.status,.conclusion] | @tsv' | head -n1 || true)"
+            if [ "${result}" = $'completed\tsuccess' ]; then exit 0; fi
+            if printf '%s' "${result}" | grep -q $'^completed\t'; then echo "exact-SHA CI did not pass: ${result}" >&2; exit 1; fi
+            sleep 30
+          done
+          echo 'timed out waiting for exact-SHA CI' >&2
+          exit 1
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: verify-ci
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu]
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.verify-ci.outputs.target_sha }}
+          persist-credentials: false
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: 0.77.1
+          cache: true
+      - name: Install dependencies and model
+        run: |
+          pixi install
+          pixi run python -m mgesture model install
+      - name: Validate canonical target row
+        run: |
+          pixi run python - <<'PY'
+          import sys
+          sys.path.insert(0, 'scripts/release')
+          from release_targets import target
+          row = target('${{ matrix.target }}')
+          assert row.publishable and row.asset == 'mgesture-${{ matrix.target }}.tar.gz'
+          PY
+      - name: Build standalone archive
+        run: pixi run python scripts/release/build_bundle.py --target ${{ matrix.target }} --output dist/mgesture-${{ matrix.target }}.tar.gz --version ${{ needs.verify-ci.outputs.version }} --commit ${{ needs.verify-ci.outputs.target_sha }}
+      - name: Extract and execute clean-machine smoke
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mgesture-clean"
+          tar -xzf "dist/mgesture-${{ matrix.target }}.tar.gz" -C "$RUNNER_TEMP/mgesture-clean"
+          binary="$RUNNER_TEMP/mgesture-clean/mgesture/bin/mgesture"
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" --version
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" self-test --headless --fake-input
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" doctor --runtime --json | grep -F '"compiler_required": false'
+      - name: Upload standalone archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: standalone-${{ matrix.target }}
+          path: dist/mgesture-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  prepare:
+    name: Prepare verified release assets
+    needs: [verify-ci, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.verify-ci.outputs.target_sha }}
+          persist-credentials: false
+      - name: Download archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: standalone-x86_64-unknown-linux-gnu
+          path: release-assets
+      - name: Set up Pixi for metadata and SBOM
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: 0.77.1
+          cache: true
+      - name: Install metadata environment
+        run: pixi install
+      - name: Prepare manifest, SBOM, and checksums
+        env:
+          VERSION: ${{ needs.verify-ci.outputs.version }}
+          COMMIT: ${{ needs.verify-ci.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          cp install.sh install.ps1 release-assets/
+          pixi run python scripts/release/render_manifest.py --version "$VERSION" --commit "$COMMIT" --assets release-assets --output release-assets
+          pixi run python scripts/release/sbom.py --version "$VERSION" --output release-assets/mgesture-sbom.spdx.json
+          pixi run python scripts/release/generate_checksums.py release-assets
+          pixi run python scripts/release/verify_release.py release-assets --version "$VERSION"
+      - name: Attest final archive and SBOM
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            release-assets/mgesture-x86_64-unknown-linux-gnu.tar.gz
+            release-assets/mgesture-sbom.spdx.json
+      - name: Install and validate ClamAV
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clamav
+          scripts/release/scan_assets.sh release-assets
+      - name: Upload verified release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: verified-release-assets
+          path: release-assets
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [verify-ci, prepare]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: verified-release-assets
+          path: release-assets
+      - name: Publish exact commit release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify-ci.outputs.version }}
+          TARGET_SHA: ${{ needs.verify-ci.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          gh release create "v${VERSION}" release-assets/* --target "${TARGET_SHA}" --title "mgesture ${VERSION}" --notes "Exact commit: ${TARGET_SHA}\n\nStandalone Linux target is included when its release manifest row is publishable. Python reference engine is bundled; GPU and Mojo claims remain runtime/target-specific."

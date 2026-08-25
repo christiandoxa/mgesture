@@ -1,0 +1,45 @@
+[workspace]
+name = "mgesture"
+description = "Local webcam hand-gesture mouse control"
+channels = ["https://conda.modular.com/max/", "conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+
+[dependencies]
+python = "3.11.*"
+
+[pypi-dependencies]
+mgesture = { path = ".", editable = true, extras = ["dev"] }
+
+[target.linux-64.dependencies]
+mojo = "==1.0.0"
+evdev = ">=1.7,<2"
+
+[target.osx-arm64.dependencies]
+mojo = "==1.0.0"
+
+[target.linux-64.pypi-dependencies]
+
+[target.osx-64.pypi-dependencies]
+pyobjc-framework-Quartz = ">=10,<13"
+
+[target.osx-arm64.pypi-dependencies]
+pyobjc-framework-Quartz = ">=10,<13"
+
+[tasks]
+setup = "python -m mgesture model install"
+run = "python -m mgesture run"
+doctor = "python -m mgesture doctor"
+test = "pytest -q"
+lint = "ruff check src tests scripts"
+format = "ruff format --check src tests scripts"
+typecheck = "mypy src/mgesture"
+replay = "python -m mgesture replay"
+benchmark = "python -m mgesture benchmark --compare"
+build = "python -m build"
+validate-version = "python scripts/release/validate_version.py"
+release-check = "python scripts/release/validate_version.py && python scripts/release/verify_release.py --help"
+package-local = "python scripts/release/build_bundle.py --target x86_64-unknown-linux-gnu --output dist/mgesture-x86_64-unknown-linux-gnu.tar.gz"
+smoke-standalone = "python -m mgesture self-test --headless --fake-input"
+sbom = "python scripts/release/sbom.py --output dist/mgesture-sbom.spdx.json"
+mojo-build = "mkdir -p build && mojo build mojo/mgesture_core.mojo --emit shared-lib -o build/mgesture_core.so"
+mojo-test = "mojo run mojo/tests/test_core.mojo"
