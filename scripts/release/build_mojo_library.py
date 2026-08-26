@@ -44,7 +44,7 @@ MOJO_EXPORTS = (
 )
 
 
-def find_windows_tool(name: str) -> str | None:
+def find_windows_tool(name: str, architecture: str | None = None) -> str | None:
     vswhere = shutil.which("vswhere.exe")
     if vswhere is None:
         program_files_x86 = os.environ.get("ProgramFiles(x86)")
@@ -61,11 +61,18 @@ def find_windows_tool(name: str) -> str | None:
             text=True,
             check=False,
         )
-        visual_studio_tool = next(
-            (line.strip() for line in result.stdout.splitlines() if line.strip()), None
-        )
-        if visual_studio_tool is not None:
-            return visual_studio_tool
+        candidates = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if architecture is not None:
+            target_directories = {
+                "x86_64": {"x64", "amd64"},
+                "aarch64": {"arm64", "arm64ec"},
+            }[architecture]
+            for candidate in candidates:
+                if Path(candidate.replace("\\", "/")).parent.name.lower() in target_directories:
+                    return candidate
+            return shutil.which(name)
+        if candidates:
+            return candidates[0]
     return shutil.which(name)
 
 
@@ -150,16 +157,25 @@ def link_library(target_name: str, object_path: Path, output: Path) -> Path:
             str(object_path),
         ]
     else:
-        linker = find_windows_tool("link.exe") or find_windows_tool("lld-link.exe")
+        linker = find_windows_tool("link.exe", release_target.architecture) or find_windows_tool(
+            "lld-link.exe", release_target.architecture
+        )
         if linker is None:
             raise RuntimeError(
                 "MSVC link.exe or lld-link.exe is required to link the Windows Mojo library"
             )
         machine = "ARM64" if release_target.architecture == "aarch64" else "X64"
-        compiler = find_windows_tool("cl.exe") or find_windows_tool("clang-cl.exe")
         shim_directory = tempfile.TemporaryDirectory(prefix="mgesture-mojo-win-")
         shim_object: Path | None = None
-        if compiler:
+        # Mojo's x86_64 COFF output references MSVC's _fltused sentinel. The
+        # AArch64 output does not; compiling an arbitrary host/ARM32 shim for
+        # it makes link.exe reject an otherwise valid ARM64 object.
+        if release_target.architecture == "x86_64":
+            compiler = find_windows_tool(
+                "cl.exe", release_target.architecture
+            ) or find_windows_tool("clang-cl.exe", release_target.architecture)
+            if compiler is None:
+                raise RuntimeError("an x86_64 MSVC-compatible compiler is required for _fltused")
             shim_source = Path(shim_directory.name) / "fltused.c"
             shim_object = Path(shim_directory.name) / "fltused.obj"
             shim_source.write_text("int _fltused = 0;\n", encoding="ascii")
@@ -168,6 +184,11 @@ def link_library(target_name: str, object_path: Path, output: Path) -> Path:
                 cwd=ROOT,
                 check=True,
             )
+            if binary_architectures(shim_object) != {release_target.architecture}:
+                raise RuntimeError(
+                    f"MSVC shim architecture mismatch for {target_name}: "
+                    f"expected {release_target.architecture}"
+                )
         command = [
             linker,
             "/DLL",
@@ -199,6 +220,12 @@ def build(target_name: str, output: Path, object_path: Path | None = None) -> Pa
     if library.name != native_library_name(release_target.os):
         raise RuntimeError(
             f"native Mojo library must be named {native_library_name(release_target.os)}"
+        )
+    architectures = binary_architectures(library)
+    if architectures != {release_target.architecture}:
+        raise RuntimeError(
+            f"native Mojo library architecture mismatch for {target_name}: "
+            f"expected {release_target.architecture}, got {architectures}"
         )
     return library
 

@@ -54,4 +54,5 @@ package-local = "python scripts/release/build_mojo_library.py --target x86_64-un
 smoke-standalone = "python -m mgesture self-test --headless --fake-input"
 sbom = "python scripts/release/sbom.py --output dist/mgesture-sbom.spdx.json"
 mojo-build = "python scripts/release/build_mojo_library.py"
+mojo-probe = "python scripts/release/probe_mojo_target.py --all --output build/mojo-probe.json"
 mojo-test = "mojo run mojo/tests/test_core.mojo"

@@ -86,6 +86,12 @@ tar -xzf "$tmp/$asset" -C "$stage"
 root="$stage/mgesture"
 binary="$root/bin/mgesture"
 [ -x "$binary" ] || fail 'archive missing mgesture/bin/mgesture'
+case "$(uname -s)" in
+  Darwin) native_library=libmgesture_mojo.dylib;;
+  Linux) native_library=libmgesture_mojo.so;;
+  *) fail 'unsupported native Mojo library platform';;
+esac
+[ -f "$root/runtime/mojo/$native_library" ] || fail "archive missing runtime/mojo/$native_library"
 version_line=$(MGESTURE_BUNDLE_ROOT="$root" "$binary" --version)
 case "$version_line" in mgesture\ *) ;; *) fail 'staged executable did not report mgesture';; esac
 installed_version=${version_line#'mgesture '}

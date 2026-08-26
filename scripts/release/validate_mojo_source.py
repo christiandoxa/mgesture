@@ -60,6 +60,7 @@ def validate_bundle(root: Path) -> None:
         or metadata.get("native_mojo_engine_loaded") is not True
         or metadata.get("mojo_abi_version") != 1
         or metadata.get("mojo_library") != native_library_name(str(metadata.get("os", "")))
+        or metadata.get("mojo_library_arch") != metadata.get("architecture")
     ):
         raise ValueError("bundle Mojo source metadata does not match its source files")
     mojo = metadata.get("mojo")
@@ -72,6 +73,7 @@ def validate_bundle(root: Path) -> None:
         or mojo.get("native_engine_loaded") is not True
         or mojo.get("abi_version") != metadata.get("mojo_abi_version")
         or mojo.get("library") != native_library_name(str(metadata.get("os", "")))
+        or mojo.get("library_arch") != metadata.get("architecture")
         or mojo.get("library_sha256") != metadata.get("mojo_library_sha256")
     ):
         raise ValueError("bundle nested Mojo source metadata does not match")

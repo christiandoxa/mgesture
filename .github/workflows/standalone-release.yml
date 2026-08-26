@@ -94,6 +94,8 @@ jobs:
           pixi run mojo build --print-supported-targets
       - name: Emit cross-target Mojo objects
         run: pixi run python scripts/release/build_mojo_objects.py --output-dir mojo-objects
+      - name: Probe all Mojo target capabilities
+        run: pixi run python scripts/release/probe_mojo_target.py --all --output mojo-objects/mojo-capability.json
       - name: Validate cross-target object set
         run: test "$(find mojo-objects -maxdepth 1 -type f -name '*.o' | wc -l)" = 3
       - name: Upload cross-target Mojo objects
@@ -168,6 +170,24 @@ jobs:
       - name: Validate native Mojo ABI (Windows)
         if: runner.os == 'Windows'
         run: pixi run python scripts/release/validate_mojo_abi.py --target ${{ matrix.target }} --library build/mgesture_mojo.dll
+      - name: Probe native Mojo library (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          object=build/libmgesture_mojo.o
+          if [ "${{ matrix.mojo_build_mode }}" = cross-object ]; then object="mojo-objects/${{ matrix.target }}.o"; fi
+          library=build/libmgesture_mojo.so
+          if [ "$RUNNER_OS" = macOS ]; then library=build/libmgesture_mojo.dylib; fi
+          pixi run python scripts/release/probe_mojo_target.py --target "${{ matrix.target }}" --object "$object" --library "$library" --output build/mojo-probe.json
+          pixi run python -c "import json; report=json.load(open('build/mojo-probe.json')); assert report['targets']['${{ matrix.target }}']['native']['executed'] is True"
+      - name: Probe native Mojo library (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $object = "mojo-objects\${{ matrix.target }}.o"
+          $library = "build\mgesture_mojo.dll"
+          pixi run python scripts/release/probe_mojo_target.py --target "${{ matrix.target }}" --object $object --library $library --output build/mojo-probe.json
+          pixi run python -c "import json; report=json.load(open('build/mojo-probe.json')); assert report['targets']['${{ matrix.target }}']['native']['executed'] is True"
       - name: Build standalone archive (Unix)
         if: runner.os != 'Windows'
         run: pixi run python scripts/release/build_bundle.py --target ${{ matrix.target }} --output dist/${{ matrix.asset }} --version ${{ needs.verify-ci.outputs.version }} --commit ${{ needs.verify-ci.outputs.target_sha }} --mojo-library build/libmgesture_mojo.${{ runner.os == 'macOS' && 'dylib' || 'so' }}

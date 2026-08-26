@@ -44,33 +44,41 @@ def run_self_test(require_mojo: bool = False, engine_request: str = "auto") -> d
     checks["model"] = "passed" if model is not None else "not-bundled-source"
     backend = FakeMouseBackend()
     selected_engine = "mojo" if require_mojo else engine_request
+    active_engine = "unavailable"
     try:
         engine = create_engine(
             selected_engine,
             EngineConfig(reacquisition_ms=0, activation_gesture=False),
             armed=True,
         )
-        if selected_engine == "mojo" and engine.name != "mojo":
+        if selected_engine == "mojo" and not isinstance(engine, NativeMojoGestureEngine):
             raise RuntimeError("native Mojo engine was not selected")
+        active_engine = "mojo" if isinstance(engine, NativeMojoGestureEngine) else engine.name
     except Exception as exc:
         checks["gesture_engine"] = f"failed: {exc}"
         return {
             "passed": False,
             "checks": checks,
+            "active_engine": active_engine,
             "actions": 0,
             "held_buttons": [],
             "failures": checks,
         }
     actions = 0
-    for frame in synthetic_frames(60):
-        batch = engine.process(frame)
-        actions += len(batch.actions)
-        for action in batch.actions:
-            if action.button is Button.LEFT and action.type.value == "button_down":
-                backend.button_down(Button.LEFT)
-            elif action.button is Button.LEFT and action.type.value == "button_up":
-                backend.button_up(Button.LEFT)
-    backend.release_all()
+    try:
+        for frame in synthetic_frames(60):
+            batch = engine.process(frame)
+            actions += len(batch.actions)
+            for action in batch.actions:
+                if action.button is Button.LEFT and action.type.value == "button_down":
+                    backend.button_down(Button.LEFT)
+                elif action.button is Button.LEFT and action.type.value == "button_up":
+                    backend.button_up(Button.LEFT)
+    finally:
+        backend.release_all()
+        close = getattr(engine, "close", None)
+        if callable(close):
+            close()
     checks["gesture_engine"] = "passed" if actions >= 0 else "failed"
     checks["fake_backend_released"] = "passed" if not backend.held else "failed"
     failed = {
@@ -83,6 +91,7 @@ def run_self_test(require_mojo: bool = False, engine_request: str = "auto") -> d
     return {
         "passed": not failed,
         "checks": checks,
+        "active_engine": active_engine,
         "actions": actions,
         "held_buttons": [button.value for button in backend.held],
         "failures": failed,

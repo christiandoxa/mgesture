@@ -91,6 +91,11 @@ def _engine_capabilities(
     python_available = metadata.get("python_engine_available", True) is True
     if requested == "python":
         native_loaded = False
+    source_hash = metadata.get("mojo_source_sha256") or nested_mojo.get("source_sha256")
+    library_hash = metadata.get("mojo_library_sha256") or nested_mojo.get("library_sha256")
+    library_arch = nested_mojo.get("library_arch") or (
+        metadata.get("architecture") if native_available else None
+    )
     active = (
         "python"
         if requested == "python" or (requested == "auto" and not native_loaded)
@@ -114,6 +119,9 @@ def _engine_capabilities(
             or nested_mojo.get("library")
             or (native_library_name() if native_loaded else None)
         ),
+        "mojo_source_sha256": source_hash,
+        "mojo_library_sha256": library_hash,
+        "mojo_library_arch": library_arch,
         "mojo_build_target": nested_mojo.get("build_target"),
     }
 

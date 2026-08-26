@@ -70,6 +70,8 @@ try {
     $StagedRoot = Join-Path $Stage "mgesture"
     $Binary = Join-Path $StagedRoot "bin\mgesture.exe"
     if (-not (Test-Path -LiteralPath $Binary)) { Fail "archive missing mgesture/bin/mgesture.exe" }
+    $NativeLibrary = Join-Path $StagedRoot "runtime\mojo\mgesture_mojo.dll"
+    if (-not (Test-Path -LiteralPath $NativeLibrary)) { Fail "archive missing runtime/mojo/mgesture_mojo.dll" }
     $VersionLine = (& $Binary --version).Trim()
     if ($VersionLine -notmatch "^mgesture ") { Fail "staged executable did not report mgesture" }
     if ($VersionLine.Substring(9) -cne $Version) { Fail "binary version differs from manifest" }

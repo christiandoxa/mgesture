@@ -97,6 +97,7 @@ def verify(directory: Path, version: str | None = None) -> None:
         "native_mojo_engine_loaded",
         "mojo_abi_version",
         "mojo_library",
+        "mojo_library_arch",
         "mojo_library_sha256",
         "mojo_compiler_version",
         "python_runtime",
@@ -134,6 +135,8 @@ def verify(directory: Path, version: str | None = None) -> None:
             or (target["native_mojo_engine"] and target["mojo_abi_version"] != 1)
             or target["mojo_library"]
             != (native_library_name(expected.os) if expected.native_mojo_engine else None)
+            or target["mojo_library_arch"]
+            != (expected.architecture if expected.native_mojo_engine else None)
             or (
                 expected.native_mojo_engine
                 and not re.fullmatch(r"[0-9a-f]{64}", str(target["mojo_library_sha256"]))
@@ -157,6 +160,7 @@ def verify(directory: Path, version: str | None = None) -> None:
             or mojo.get("native_engine_loaded") is not target["native_mojo_engine_loaded"]
             or mojo.get("abi_version") != target["mojo_abi_version"]
             or mojo.get("library") != target["mojo_library"]
+            or mojo.get("library_arch") != target["mojo_library_arch"]
             or mojo.get("library_sha256") != target["mojo_library_sha256"]
             or mojo.get("build_target") != name
             or mojo.get("compiler_version") != target["mojo_compiler_version"]

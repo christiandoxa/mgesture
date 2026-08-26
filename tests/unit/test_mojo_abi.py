@@ -9,6 +9,7 @@ from mgesture.engine import EngineConfig, create_engine
 from mgesture.engine.models import LandmarkFrame
 from mgesture.engine.mojo_engine import MOJO_ABI_VERSION, native_library_name
 from mgesture.engine.synthetic import synthetic_frames, synthetic_landmarks
+from mgesture.self_test import run_self_test
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,6 +32,20 @@ def _signature(batch: object) -> list[tuple[str, str | None, str | None]]:
         )
         for action in batch.actions  # type: ignore[attr-defined]
     ]
+
+
+def test_forced_mojo_self_test_rejects_non_native_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeMojoEngine:
+        name = "mojo"
+
+    monkeypatch.setattr(
+        "mgesture.self_test.create_engine",
+        lambda *args, **kwargs: FakeMojoEngine(),
+    )
+    result = run_self_test(require_mojo=True, engine_request="mojo")
+    assert result["passed"] is False
+    assert result["active_engine"] == "unavailable"
+    assert "native Mojo engine was not selected" in str(result["failures"]["gesture_engine"])
 
 
 def test_native_mojo_abi_loads_and_processes_landmarks() -> None:

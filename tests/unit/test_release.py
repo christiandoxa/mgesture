@@ -5,6 +5,7 @@ import sys
 import tarfile
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -82,6 +83,70 @@ def test_ci_matrix_uses_all_stable_targets_and_native_runners() -> None:
     assert {row["target"] for row in rows} == set(targets)
     assert all(row["runner"] == targets[row["target"]].runner for row in rows)
     assert all(row["asset"] == targets[row["target"]].asset for row in rows)
+
+
+def test_windows_tool_lookup_matches_target_architecture(monkeypatch: pytest.MonkeyPatch) -> None:
+    import build_mojo_library
+
+    candidates = "\n".join(
+        (
+            r"C:\VS\bin\HostX64\arm\cl.exe",
+            r"C:\VS\bin\HostX64\arm64\cl.exe",
+            r"C:\VS\bin\HostX64\x64\cl.exe",
+        )
+    )
+    monkeypatch.setattr(
+        build_mojo_library.shutil,
+        "which",
+        lambda name: "C:/VS/Installer/vswhere.exe" if name == "vswhere.exe" else None,
+    )
+    monkeypatch.setattr(
+        build_mojo_library.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout=candidates),
+    )
+
+    assert build_mojo_library.find_windows_tool("cl.exe", "aarch64").endswith(r"\arm64\cl.exe")
+    assert build_mojo_library.find_windows_tool("cl.exe", "x86_64").endswith(r"\x64\cl.exe")
+
+
+def test_windows_arm_link_does_not_add_x86_shim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import build_mojo_library
+
+    object_path = tmp_path / "aarch64-pc-windows-msvc.o"
+    object_path.write_bytes(b"COFF")
+    (tmp_path / "mojo-build-metadata.json").write_text(
+        '{"source_sha256": "source", "targets": ["aarch64-pc-windows-msvc"]}\n',
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+    monkeypatch.setattr(build_mojo_library, "binary_architectures", lambda path: {"aarch64"})
+    monkeypatch.setattr(
+        build_mojo_library,
+        "mojo_source_metadata",
+        lambda path: {"sha256": "source"},
+    )
+    monkeypatch.setattr(
+        build_mojo_library,
+        "find_windows_tool",
+        lambda name, architecture=None: "link.exe" if name == "link.exe" else None,
+    )
+    monkeypatch.setattr(
+        build_mojo_library.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command) or SimpleNamespace(returncode=0),
+    )
+
+    output = build_mojo_library.link_library(
+        "aarch64-pc-windows-msvc", object_path, tmp_path / "mgesture_mojo.dll"
+    )
+
+    assert output.name == "mgesture_mojo.dll"
+    assert len(commands) == 1
+    assert "/MACHINE:ARM64" in commands[0]
+    assert not any("fltused" in argument.lower() for argument in commands[0])
 
 
 def test_readme_capability_table_matches_target_matrix() -> None:

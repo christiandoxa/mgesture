@@ -206,6 +206,7 @@ def build(
             "mojo_compiler_version": mojo_compiler_version,
             "mojo_abi_version": 1 if native_mojo else None,
             "mojo_library": native_library_name(release_target.os) if native_mojo else None,
+            "mojo_library_arch": release_target.architecture if native_mojo else None,
             "mojo_library_sha256": mojo_library_sha256,
             "mojo": {
                 "source_available": release_target.mojo_source,
@@ -215,6 +216,7 @@ def build(
                 "native_engine_loaded": False,
                 "abi_version": 1 if native_mojo else None,
                 "library": native_library_name(release_target.os) if native_mojo else None,
+                "library_arch": release_target.architecture if native_mojo else None,
                 "library_sha256": mojo_library_sha256,
                 "build_target": target_name if native_mojo else None,
                 "compiler_version": mojo_compiler_version,

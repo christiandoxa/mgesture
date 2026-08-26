@@ -112,6 +112,9 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
         mojo_library = metadata.get(
             "mojo_library", native_library_name(target.os) if native_mojo_engine else None
         )
+        mojo_library_arch = metadata.get(
+            "mojo_library_arch", target.architecture if native_mojo_engine else None
+        )
         if native_mojo_engine:
             mojo_library_sha256 = archive_file_digest(
                 asset_path,
@@ -142,6 +145,7 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
             "native_mojo_engine_loaded": native_mojo_engine_loaded,
             "mojo_abi_version": mojo_abi_version,
             "mojo_library": mojo_library,
+            "mojo_library_arch": mojo_library_arch,
             "mojo_library_sha256": mojo_library_sha256,
             "mojo_compiler_version": mojo_compiler_version,
             "python_engine_available": bool(
@@ -156,6 +160,7 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
                 "native_engine_loaded": native_mojo_engine_loaded,
                 "abi_version": mojo_abi_version,
                 "library": mojo_library,
+                "library_arch": mojo_library_arch,
                 "library_sha256": mojo_library_sha256,
                 "build_target": mojo_build_target,
                 "compiler_version": mojo_compiler_version,
