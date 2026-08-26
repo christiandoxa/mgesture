@@ -12,7 +12,7 @@ from mgesture.release import mojo_source_metadata, normalize_architecture
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "release"))
 
-from release_targets import publishable_targets  # noqa: E402
+from release_targets import STABLE_TARGETS, ci_matrix, publishable_targets  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -56,6 +56,16 @@ def test_stable_targets_expose_all_source_capabilities() -> None:
     assert "mgesture_core.mojo" in source["files"]
     assert len(str(source["sha256"])) == 64
     assert any(target.mojo_source and not target.native_mojo_engine for target in targets.values())
+
+
+def test_ci_matrix_uses_all_stable_targets_and_native_runners() -> None:
+    rows = ci_matrix()
+    assert len(rows) == 6
+    assert {row["target"] for row in rows} == STABLE_TARGETS
+    assert {row["mojo_ci_mode"] for row in rows} == {"native", "source-contract"}
+    targets = publishable_targets()
+    assert {row["target"] for row in rows} == set(targets)
+    assert all(row["runner"] == targets[row["target"]].runner for row in rows)
 
 
 def test_readme_capability_table_matches_target_matrix() -> None:
