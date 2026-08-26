@@ -1,13 +1,16 @@
 # Platform support
 
-| Platform | Camera | Pointer/buttons | Scrolling | Mojo | Python | Actually tested here | Limitations |
-|---|---|---|---|---|---|---|---|
-| Zorin OS 18.1 x86_64 X11 | OpenCV path implemented | pynput/X11 path implemented | implemented | installed stable 1.0.0, build pending | implemented | CLI/environment only so far | webcam, model, real pointer, and Mojo build still need hardware run |
-| Linux Wayland | OpenCV path implemented | uinput path implemented | implemented | supported where native Mojo exists | implemented | not tested | `/dev/uinput` permissions; layout/portal integration limited |
-| macOS Apple Silicon | OpenCV path implemented | Quartz path implemented | implemented | Pixi package available; not hardware tested | implemented | not tested | Camera and Accessibility permissions |
-| macOS Intel | OpenCV dependency conditional; verify package support | Quartz path implemented | implemented | no Pixi Mojo candidate in current lock solve | implemented where MediaPipe wheel exists | not tested | dependency availability varies |
-| Windows native | OpenCV path implemented | SendInput path implemented | implemented | explicitly Python-only | implemented | not tested | native Windows required; no WSL-only claim |
+| Platform | Architecture | Standalone | Vision backend | Mojo source | Python engine | Native package smoke |
+|---|---|---:|---|---:|---:|---|
+| Linux | x86_64 | Yes | MediaPipe | Yes | Yes | CI/release runner |
+| Linux | ARM64 | Yes | MediaPipe | No | Yes | CI/release runner |
+| macOS | Intel x86_64 | Yes | MediaPipe 0.10.21 | No | Yes | CI/release runner |
+| macOS | Apple Silicon ARM64 | Yes | MediaPipe | Yes | Yes | CI/release runner |
+| Windows | x86_64 | Yes | MediaPipe | No | Yes | CI/release runner |
+| Windows | ARM64 | Yes | MediaPipe | No | Yes | CI/release runner |
 
-Status meanings: implemented means source path exists; unit tested means fake/replay tests cover it; CI tested and hardware tested are only claimed after those checks run. No frame or real-pointer hardware test is part of ordinary CI.
+Stable releases publish exactly these six native targets. The standalone runtime always uses the Python reference engine with CPU fallback; Mojo availability above describes the development/source environment and is not bundled. The macOS Intel lane uses the stable MediaPipe 0.10.21 x86_64 wheel, the last selected stable release with a native Intel macOS wheel. Windows ARM uses a native OpenCV source build with DNN disabled because the selected OpenCV PyPI release has no Windows ARM64 wheel.
+
+All six rows use the same vision, gesture, dispatch, and cleanup architecture. Camera discovery/capture, Accessibility permissions on macOS, `/dev/uinput` permissions on Linux Wayland, and real pointer behavior remain manual hardware checks; ordinary CI uses only fake input and no webcam.
 
 Standalone distribution currently has six publishable matrix rows: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, and `aarch64-pc-windows-msvc`. Each is packaged as a PyInstaller onedir archive with the pinned model and Python reference engine. Matching-host CI extracts each archive and passes `--version`, `self-test --headless --fake-input`, and runtime diagnostics without system Python or Mojo. Camera, Accessibility, and real-pointer behavior remain manual hardware checks; the Windows ARM build uses a pinned OpenCV source build with DNN disabled because the published OpenCV wheel has no Windows ARM64 binary.

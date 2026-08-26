@@ -20,6 +20,7 @@ class Target:
     mediapipe: bool
     native_smoke: bool
     minimum_glibc: str
+    minimum_os: str
     publishable: bool
     status: str
     notes: str
@@ -36,3 +37,12 @@ def target(name: str, path: Path | None = None) -> Target:
         return load_targets(path)[name]
     except KeyError as exc:
         raise ValueError(f"unknown release target: {name}") from exc
+
+
+def publishable_targets(path: Path | None = None) -> dict[str, Target]:
+    targets = {name: value for name, value in load_targets(path).items() if value.publishable}
+    if len(targets) != 6:
+        raise ValueError(
+            f"stable releases require exactly six publishable targets, found {len(targets)}"
+        )
+    return targets

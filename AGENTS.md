@@ -147,6 +147,17 @@ Hardware validation uses `pixi run python -m mgesture doctor --json`; real webca
 
 ## Distribution and Releases
 
+- Stable standalone releases target exactly these native platforms:
+  `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
+  `x86_64-apple-darwin`, `aarch64-apple-darwin`,
+  `x86_64-pc-windows-msvc`, and `aarch64-pc-windows-msvc`.
+- Never remove a release target solely to make CI pass, and never publish an
+  artifact whose executable architecture differs from its target metadata.
+- Platform-specific acceleration must not fork core gesture behavior. Reuse the
+  canonical target matrix for workflows, installers, packaging, and manifests.
+- Stable release publication requires every mandatory target to pass native
+  package smoke tests; call a target supported only after its final bundle runs
+  successfully on that native architecture.
 - Official end-user distribution is through GitHub Releases, not a source checkout.
 - Release users receive standalone bundles; they do not need Python, Pixi, or a Mojo compiler.
 - README installation commands remain versionless and use `releases/latest/download`.

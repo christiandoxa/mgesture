@@ -8,12 +8,14 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "release"))
 
-from release_targets import load_targets  # noqa: E402
+from release_targets import publishable_targets  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
 from mgesture.vision.model_manager import MODEL_SHA256  # noqa: E402
@@ -33,22 +35,66 @@ def runtime_version() -> str:
     return str(namespace["__version__"])
 
 
+def archive_metadata(path: Path, archive_format: str) -> dict[str, object]:
+    member_suffix = "share/mgesture/release-metadata.json"
+    try:
+        if archive_format == "zip":
+            with zipfile.ZipFile(path) as archive:
+                member = next(name for name in archive.namelist() if name.endswith(member_suffix))
+                value = json.loads(archive.read(member))
+        else:
+            with tarfile.open(path, "r:gz") as archive:
+                member = next(
+                    item for item in archive.getmembers() if item.name.endswith(member_suffix)
+                )
+                handle = archive.extractfile(member)
+                if handle is None:
+                    return {}
+                value = json.load(handle)
+    except (
+        KeyError,
+        OSError,
+        StopIteration,
+        tarfile.TarError,
+        zipfile.BadZipFile,
+        json.JSONDecodeError,
+    ):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def render(version: str, commit: str, assets: Path, output: Path) -> None:
     if version != runtime_version():
         raise ValueError(f"manifest version {version} does not match runtime {runtime_version()}")
-    targets = load_targets()
+    targets = publishable_targets()
     rows: dict[str, dict[str, object]] = {}
     for name, target in targets.items():
         asset_path = assets / target.asset
         if not asset_path.exists():
-            continue
+            raise RuntimeError(f"missing required target asset: {target.asset}")
+        metadata = archive_metadata(asset_path, target.format)
         rows[name] = {
+            "target": name,
             "asset": target.asset,
             "sha256": digest(asset_path),
+            "os": target.os,
+            "arch": target.architecture,
+            "native": bool(metadata.get("native", True)),
+            "python_runtime": str(metadata.get("python_runtime", target.python)),
+            "mediapipe_version": str(metadata.get("mediapipe_version", "not-recorded")),
+            "vision_backend": str(metadata.get("vision_backend", "mediapipe")),
+            "gesture_engine": str(metadata.get("gesture_engine_default", target.implementation)),
+            "mojo_available": bool(metadata.get("mojo_available", False)),
+            "python_engine_available": bool(
+                metadata.get("python_engine_available", target.python_fallback)
+            ),
+            "minimum_os": target.minimum_os,
+            "package_format": target.format,
+            "smoke_test": "native-package-smoke",
+            "provenance": "github-actions-artifact-attestation",
             "implementation": target.implementation,
             "python_fallback": target.python_fallback,
             "mojo_engine": target.mojo_engine,
-            "os": target.os,
             "architecture": target.architecture,
             "runner": target.runner,
             "mediapipe": target.mediapipe,
@@ -56,8 +102,8 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
             "python": target.python,
             "minimum_glibc": target.minimum_glibc,
         }
-    if not rows:
-        raise RuntimeError("no target assets found")
+    if set(rows) != set(targets):
+        raise RuntimeError("release assets do not contain exactly the required target matrix")
     try:
         mediapipe_version = importlib.metadata.version("mediapipe")
     except importlib.metadata.PackageNotFoundError:

@@ -38,7 +38,6 @@ if ($Uninstall -or $args -contains "--uninstall") { Remove-Install; exit 0 }
 if ($Release -cne "latest" -and $Release -notmatch "^\d+\.\d+\.\d+(?:[+-][0-9A-Za-z.-]+)?$") { Fail "release must be latest or x.y.z" }
 $Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($Architecture -eq "X64") { $Target = "x86_64-pc-windows-msvc" } elseif ($Architecture -eq "Arm64") { $Target = "aarch64-pc-windows-msvc" } else { Fail "unsupported Windows architecture: $Architecture" }
-$Asset = "mgesture-$Target.zip"
 if ([string]::IsNullOrWhiteSpace($Base)) {
     if ($Release -eq "latest") { $Base = "https://github.com/$Repository/releases/latest/download" }
     else { $Base = "https://github.com/$Repository/releases/download/$Release" }
@@ -52,7 +51,9 @@ try {
     $Manifest = Get-Content -Raw -LiteralPath (Join-Path $Temp "release-manifest.json") | ConvertFrom-Json
     if ($Manifest.schema_version -ne 1) { Fail "unsupported JSON manifest schema" }
     $TargetEntry = $Manifest.targets.PSObject.Properties[$Target].Value
-    if ($null -eq $TargetEntry -or $TargetEntry.asset -cne $Asset) { Fail "release has no matching target $Target" }
+    if ($null -eq $TargetEntry -or [string]::IsNullOrWhiteSpace([string]$TargetEntry.asset)) { Fail "release has no matching target $Target" }
+    $Asset = [string]$TargetEntry.asset
+    if ($Asset -cnotmatch "^mgesture-$([regex]::Escape($Target))\.zip$") { Fail "release manifest asset mismatch for $Target" }
     $Tsv = Get-Content -LiteralPath (Join-Path $Temp "release-manifest.tsv")
     $Version = ($Tsv | Where-Object { $_ -like "# version`t*" } | Select-Object -First 1).Split("`t")[1]
     $Commit = ($Tsv | Where-Object { $_ -like "# commit`t*" } | Select-Object -First 1).Split("`t")[1]

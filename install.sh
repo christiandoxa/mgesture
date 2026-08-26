@@ -46,13 +46,12 @@ done
 case "$release" in latest|[0-9]*.[0-9]*.[0-9]*) ;; *) fail 'release must be latest or x.y.z';; esac
 
 case "$(uname -s):$(uname -m)" in
-  Linux:x86_64|Linux:amd64) target=x86_64-unknown-linux-gnu;;
+  Linux:x86_64|Linux:amd64|Linux:x64) target=x86_64-unknown-linux-gnu;;
   Linux:aarch64|Linux:arm64) target=aarch64-unknown-linux-gnu;;
-  Darwin:x86_64|Darwin:amd64) target=x86_64-apple-darwin;;
+  Darwin:x86_64|Darwin:amd64|Darwin:x64) target=x86_64-apple-darwin;;
   Darwin:arm64|Darwin:aarch64) target=aarch64-apple-darwin;;
   *) fail "unsupported target: $(uname -s)-$(uname -m)";;
 esac
-asset="mgesture-$target.tar.gz"
 if [ -z "$base" ]; then
   if [ "$release" = latest ]; then base="https://github.com/$repo/releases/latest/download"; else base="https://github.com/$repo/releases/download/$release"; fi
 fi
@@ -63,6 +62,9 @@ download "${base%/}/release-manifest.json" "$tmp/release-manifest.json"
 download "${base%/}/release-manifest.tsv" "$tmp/release-manifest.tsv"
 schema=$(awk -F '\t' '$1 == "# schema_version" {print $2; exit}' "$tmp/release-manifest.tsv")
 [ "$schema" = 1 ] || fail 'unsupported release manifest schema'
+asset=$(awk -F '\t' -v target="$target" '$1 == target {print $2; exit}' "$tmp/release-manifest.tsv")
+[ -n "$asset" ] || fail "release manifest has no matching target $target"
+case "$asset" in "mgesture-$target.tar.gz") ;; *) fail 'release manifest asset mismatch';; esac
 manifest_version=$(awk -F '\t' '$1 == "# version" {print $2; exit}' "$tmp/release-manifest.tsv")
 manifest_commit=$(awk -F '\t' '$1 == "# commit" {print $2; exit}' "$tmp/release-manifest.tsv")
 printf '%s' "$manifest_commit" | grep -Eq '^[0-9a-fA-F]{40}$' || fail 'manifest commit is not a full SHA'

@@ -10,6 +10,32 @@ import pytest
 from mgesture.release import current_target
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts" / "release"))
+
+from release_targets import publishable_targets  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "expected"),
+    [
+        ("Linux", "x86_64", "x86_64-unknown-linux-gnu"),
+        ("Linux", "aarch64", "aarch64-unknown-linux-gnu"),
+        ("Darwin", "x86_64", "x86_64-apple-darwin"),
+        ("Darwin", "arm64", "aarch64-apple-darwin"),
+        ("Windows", "amd64", "x86_64-pc-windows-msvc"),
+        ("Windows", "x64", "x86_64-pc-windows-msvc"),
+        ("Windows", "arm64", "aarch64-pc-windows-msvc"),
+        ("Windows", "aarch64", "aarch64-pc-windows-msvc"),
+    ],
+)
+def test_current_target_aliases(
+    monkeypatch: pytest.MonkeyPatch, system: str, machine: str, expected: str
+) -> None:
+    import mgesture.release as release
+
+    monkeypatch.setattr(release.platform, "system", lambda: system)
+    monkeypatch.setattr(release.platform, "machine", lambda: machine)
+    assert release.current_target() == expected
 
 
 def _release_fixture(path: Path) -> Path:
@@ -22,8 +48,13 @@ def _release_fixture(path: Path) -> Path:
     )
     binary.chmod(0o755)
     asset = path / f"mgesture-{current_target()}.tar.gz"
-    with tarfile.open(asset, "w:gz") as archive:
-        archive.add(path / "bundle" / "mgesture", arcname="mgesture")
+    for release_target in publishable_targets().values():
+        archive_path = path / release_target.asset
+        if release_target.format == "tar.gz":
+            with tarfile.open(archive_path, "w:gz") as archive:
+                archive.add(path / "bundle" / "mgesture", arcname="mgesture")
+        else:
+            archive_path.write_bytes(b"fixture placeholder")
     (path / "install.sh").write_bytes((ROOT / "install.sh").read_bytes())
     (path / "install.ps1").write_bytes((ROOT / "install.ps1").read_bytes())
     subprocess.run(
@@ -45,6 +76,17 @@ def _release_fixture(path: Path) -> Path:
     subprocess.run(
         [sys.executable, "scripts/release/generate_checksums.py", str(path)], cwd=ROOT, check=True
     )
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/release/verify_release.py",
+            str(path),
+            "--version",
+            "0.1.0",
+        ],
+        cwd=ROOT,
+        check=True,
+    )
     return asset
 
 
@@ -55,42 +97,69 @@ def test_unix_installer_stages_and_activates_without_python_runtime(tmp_path: Pa
     fixture = tmp_path / "release"
     fixture.mkdir()
     asset = _release_fixture(fixture)
-    home = tmp_path / "home"
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    uname = fake_bin / "uname"
+    uname.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        "  -s) printf '%s\\n' \"$MGESTURE_TEST_OS\";;\n"
+        "  -m) printf '%s\\n' \"$MGESTURE_TEST_ARCH\";;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    uname.chmod(0o755)
+    for index, (os_name, architecture, target) in enumerate(
+        (
+            ("Linux", "x86_64", "x86_64-unknown-linux-gnu"),
+            ("Linux", "aarch64", "aarch64-unknown-linux-gnu"),
+            ("Darwin", "x86_64", "x86_64-apple-darwin"),
+            ("Darwin", "arm64", "aarch64-apple-darwin"),
+        )
+    ):
+        home = tmp_path / f"home-{index}"
+        env = {
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "HOME": str(home),
+            "SHELL": "/bin/sh",
+            "MGESTURE_TEST_OS": os_name,
+            "MGESTURE_TEST_ARCH": architecture,
+            "MGESTURE_RELEASE_BASE_URL": str(fixture),
+            "MGESTURE_INSTALL_DIR": str(home / "app"),
+            "MGESTURE_BIN_DIR": str(home / "bin"),
+            "MGESTURE_NO_PATH_UPDATE": "true",
+        }
+        result = subprocess.run(
+            ["sh", str(ROOT / "install.sh")], cwd=ROOT, env=env, capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"{target}: {result.stderr}"
+        command = home / "bin" / "mgesture"
+        assert (
+            subprocess.run(
+                [str(command), "--version"], env=env, capture_output=True, text=True, check=True
+            ).stdout.strip()
+            == "mgesture 0.1.0"
+        )
+        assert (home / "app" / "current").is_symlink()
+    home = tmp_path / "failed-home"
     env = {
-        "PATH": "/usr/bin:/bin",
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
         "HOME": str(home),
         "SHELL": "/bin/sh",
+        "MGESTURE_TEST_OS": "Linux",
+        "MGESTURE_TEST_ARCH": "x86_64",
         "MGESTURE_RELEASE_BASE_URL": str(fixture),
         "MGESTURE_INSTALL_DIR": str(home / "app"),
         "MGESTURE_BIN_DIR": str(home / "bin"),
         "MGESTURE_NO_PATH_UPDATE": "true",
     }
-    result = subprocess.run(
-        ["sh", str(ROOT / "install.sh")], cwd=ROOT, env=env, capture_output=True, text=True
-    )
-    assert result.returncode == 0, result.stderr
-    command = home / "bin" / "mgesture"
-    assert (
-        subprocess.run(
-            [str(command), "--version"], env=env, capture_output=True, text=True, check=True
-        ).stdout.strip()
-        == "mgesture 0.1.0"
-    )
-    assert (home / "app" / "current").is_symlink()
     asset.write_bytes(b"corrupted")
-    failed_home = tmp_path / "failed-home"
-    failed_env = {
-        **env,
-        "HOME": str(failed_home),
-        "MGESTURE_INSTALL_DIR": str(failed_home / "app"),
-        "MGESTURE_BIN_DIR": str(failed_home / "bin"),
-    }
     failed = subprocess.run(
         ["sh", str(ROOT / "install.sh")],
         cwd=ROOT,
-        env=failed_env,
+        env=env,
         capture_output=True,
         text=True,
     )
     assert failed.returncode != 0
-    assert not (failed_home / "app" / "current").exists()
+    assert not (home / "app" / "current").exists()

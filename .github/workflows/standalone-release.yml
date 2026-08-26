@@ -112,6 +112,8 @@ jobs:
         run: |
           pixi install --locked
           pixi run python -m mgesture model install
+      - name: Validate native runner architecture
+        run: pixi run python scripts/release/validate_architecture.py runner --target ${{ matrix.target }}
       - name: Validate canonical target row
         run: >-
           pixi run python -c
@@ -126,10 +128,12 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/mgesture-clean"
           tar -xzf "dist/${{ matrix.asset }}" -C "$RUNNER_TEMP/mgesture-clean"
+          pixi run python scripts/release/validate_architecture.py bundle --target "${{ matrix.target }}" --root "$RUNNER_TEMP/mgesture-clean/mgesture"
           binary="$RUNNER_TEMP/mgesture-clean/mgesture/bin/mgesture"
           env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" --version
           env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" self-test --headless --fake-input
           env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" doctor --runtime --json | grep -F '"compiler_required": false'
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" replay --fixture "$RUNNER_TEMP/mgesture-clean/mgesture/share/mgesture/fixtures/basic.json" >/dev/null
       - name: Extract and execute clean-machine smoke (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -140,6 +144,7 @@ jobs:
           Expand-Archive -LiteralPath "dist/${{ matrix.asset }}" -DestinationPath $smoke -Force
           $bundle = Join-Path $smoke "mgesture"
           $binary = Join-Path $bundle "bin\mgesture.exe"
+          pixi run python scripts/release/validate_architecture.py bundle --target "${{ matrix.target }}" --root $bundle
           $env:MGESTURE_BUNDLE_ROOT = $bundle
           & $binary --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -147,6 +152,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $doctor = & $binary doctor --runtime --json | Out-String
           if ($LASTEXITCODE -ne 0 -or ($doctor -notmatch '"compiler_required": false')) { throw "standalone runtime diagnostics failed" }
+          & $binary replay --fixture (Join-Path $bundle "share\mgesture\fixtures\basic.json") | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload standalone archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -181,7 +188,7 @@ jobs:
           pixi-version: v0.77.1
           cache: true
       - name: Install metadata environment
-        run: pixi install
+        run: pixi install --locked
       - name: Prepare manifest, SBOM, and checksums
         env:
           VERSION: ${{ needs.verify-ci.outputs.version }}
@@ -197,12 +204,8 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: |
-            release-assets/mgesture-x86_64-unknown-linux-gnu.tar.gz
-            release-assets/mgesture-aarch64-unknown-linux-gnu.tar.gz
-            release-assets/mgesture-x86_64-apple-darwin.tar.gz
-            release-assets/mgesture-aarch64-apple-darwin.tar.gz
-            release-assets/mgesture-x86_64-pc-windows-msvc.zip
-            release-assets/mgesture-aarch64-pc-windows-msvc.zip
+            release-assets/mgesture-*.tar.gz
+            release-assets/mgesture-*.zip
             release-assets/mgesture-sbom.spdx.json
       - name: Install and validate ClamAV
         run: |

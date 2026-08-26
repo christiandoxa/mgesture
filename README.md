@@ -31,6 +31,19 @@ Release installers verify the checksum-covered release manifest and staged archi
 
 Standalone target availability is reported in [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md). Unsupported target dependencies fail explicitly instead of selecting a misleading archive.
 
+## Standalone platforms
+
+| Platform | Architecture | Standalone | Vision | Mojo source | Python engine |
+|---|---|---:|---|---:|---:|
+| Linux | x86_64 | Yes | MediaPipe | Yes | Yes |
+| Linux | ARM64 | Yes | MediaPipe | No | Yes |
+| macOS | Intel x86_64 | Yes | MediaPipe 0.10.21 | No | Yes |
+| macOS | Apple Silicon ARM64 | Yes | MediaPipe | Yes | Yes |
+| Windows | x86_64 | Yes | MediaPipe | No | Yes |
+| Windows | ARM64 | Yes | MediaPipe | No | Yes |
+
+The six rows are built and smoke-tested on matching native GitHub runners for each stable release. Mojo is optional and target-specific; every standalone bundle includes the Python reference engine and CPU fallback. Camera, Accessibility, and real-pointer behavior still require manual hardware validation.
+
 ## Status
 
 The current version contains a runnable CLI, deterministic Python engine, fake-backend replay, explicit model management, bounded camera/MediaPipe pipeline, Linux X11/Wayland-uinput/Windows/macOS adapters, centralized compute planning, and stable-Mojo build scaffolding. Hardware and cross-platform claims below are intentionally conservative; run `mgesture doctor` on the target machine.

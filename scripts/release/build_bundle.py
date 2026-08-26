@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import os
+import platform
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
@@ -75,6 +78,13 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
             str(work / "spec"),
             str(work / "entry.py"),
         ]
+        if release_target.os == "macos":
+            command.extend(
+                [
+                    "--target-architecture",
+                    "arm64" if release_target.architecture == "aarch64" else "x86_64",
+                ]
+            )
         (work / "entry.py").write_text("from mgesture.cli import main\nmain()\n", encoding="utf-8")
         subprocess.run(command, cwd=ROOT, check=True)
         bundle = work / "mgesture"
@@ -104,11 +114,25 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
             encoding="utf-8",
         )
         shutil.copy2(ROOT / "release/targets.toml", share / "targets.toml")
+        fixture = share / "fixtures" / "basic.json"
+        fixture.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / "tests/fixtures/basic.json", fixture)
+        try:
+            mediapipe_version = importlib.metadata.version("mediapipe")
+        except importlib.metadata.PackageNotFoundError:
+            mediapipe_version = "not-installed"
+        try:
+            opencv_version = importlib.metadata.version("opencv-contrib-python")
+        except importlib.metadata.PackageNotFoundError:
+            opencv_version = "not-installed"
         metadata = {
             "schema_version": 1,
             "version": version,
             "commit": commit,
             "target": target_name,
+            "os": release_target.os,
+            "architecture": release_target.architecture,
+            "native": True,
             "standalone": True,
             "implementation": release_target.implementation,
             "compiler_required": False,
@@ -116,6 +140,17 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
             "model_sha256": _sha256(model),
             "packaging": "PyInstaller onedir",
             "python": release_target.python,
+            "python_runtime": platform.python_version(),
+            "python_architecture": platform.machine(),
+            "pointer_bits": struct.calcsize("P") * 8,
+            "mediapipe_version": mediapipe_version,
+            "opencv_version": opencv_version,
+            "vision_backend": "mediapipe",
+            "gesture_engine_default": release_target.implementation,
+            "mojo_available": False,
+            "python_engine_available": release_target.python_fallback,
+            "minimum_os": release_target.minimum_os,
+            "package_format": release_target.format,
             "mojo_version": "not bundled",
             "gesture_engine": {
                 "implementation": release_target.implementation,

@@ -4,7 +4,13 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts" / "release"))
+
+from release_targets import publishable_targets  # noqa: E402
 
 
 def digest(path: Path) -> str:
@@ -25,12 +31,38 @@ def verify(directory: Path, version: str | None = None) -> None:
         raise ValueError("release manifest version mismatch")
     if not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("commit", ""))):
         raise ValueError("release manifest commit must be a full SHA")
+    expected_targets = publishable_targets()
+    manifest_targets = manifest.get("targets")
+    if not isinstance(manifest_targets, dict) or set(manifest_targets) != set(expected_targets):
+        raise ValueError("release manifest must contain exactly the six publishable target entries")
     checksum_rows = {}
     for line in checksums_path.read_text(encoding="utf-8").splitlines():
         match = re.fullmatch(r"([0-9a-fA-F]{64})\s+\*?(.+)", line)
         if match:
             checksum_rows[match[2]] = match[1].lower()
-    for target in manifest.get("targets", {}).values():
+    required_fields = {
+        "target",
+        "os",
+        "arch",
+        "asset",
+        "sha256",
+        "native",
+        "python_runtime",
+        "mediapipe_version",
+        "vision_backend",
+        "gesture_engine",
+        "mojo_available",
+        "python_engine_available",
+        "minimum_os",
+        "package_format",
+        "smoke_test",
+        "provenance",
+    }
+    for name, target in manifest_targets.items():
+        if not isinstance(target, dict) or not required_fields <= set(target):
+            raise ValueError(f"manifest entry is incomplete: {name}")
+        if target["target"] != name or target["asset"] != expected_targets[name].asset:
+            raise ValueError(f"manifest target metadata mismatch: {name}")
         asset = str(target["asset"])
         path = directory / asset
         if not path.exists() or digest(path) != str(target["sha256"]):

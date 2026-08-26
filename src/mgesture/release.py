@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import platform
@@ -28,9 +29,20 @@ class ReleaseTarget:
 def current_target() -> str:
     system = platform.system()
     machine = platform.machine().lower()
+    if system == "Windows":
+        try:
+            native_info = ctypes.create_string_buffer(64)
+            cast(Any, ctypes).windll.kernel32.GetNativeSystemInfo(native_info)
+        except AttributeError:
+            pass
+        else:
+            try:
+                machine = {9: "amd64", 12: "arm64"}[int.from_bytes(native_info.raw[:2], "little")]
+            except KeyError as exc:
+                raise RuntimeError("unsupported native Windows architecture") from exc
     arch = (
         "x86_64"
-        if machine in ("x86_64", "amd64")
+        if machine in ("x86_64", "amd64", "x64")
         else "aarch64"
         if machine in ("aarch64", "arm64")
         else machine
