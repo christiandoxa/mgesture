@@ -221,7 +221,9 @@ jobs:
           $bundle = Join-Path $smoke "mgesture"
           $binary = Join-Path $bundle "bin\mgesture.exe"
           pixi run python scripts/release/validate_mojo_source.py --root $bundle
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pixi run python scripts/release/validate_architecture.py bundle --target "${{ matrix.target }}" --root $bundle
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:MGESTURE_BUNDLE_ROOT = $bundle
           & $binary --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

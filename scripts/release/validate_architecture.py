@@ -21,7 +21,7 @@ _ARCH_ALIASES = {
     "arm64": "aarch64",
 }
 _ELF_MACHINES = {62: "x86_64", 183: "aarch64"}
-_PE_MACHINES = {0x8664: "x86_64", 0xAA64: "aarch64"}
+_PE_MACHINES = {0x014C: "i386", 0x8664: "x86_64", 0xAA64: "aarch64"}
 _MACH_CPU_TYPES = {0x01000007: "x86_64", 0x0100000C: "aarch64"}
 _MACHO_THIN = {
     b"\xfe\xed\xfa\xce": ">",

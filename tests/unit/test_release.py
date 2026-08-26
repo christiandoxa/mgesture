@@ -133,6 +133,29 @@ def test_bundle_uses_cross_compile_provenance_when_mojo_command_collides(
     assert build_bundle._mojo_compiler_version(required=True) == "Mojo 1.0.0 (cross-object)"
 
 
+def test_bundle_prunes_foreign_native_binaries(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import build_bundle
+
+    app_bin = tmp_path / "bin"
+    app_bin.mkdir()
+    native = app_bin / "native.dll"
+    foreign = app_bin / "foreign.dll"
+    native.write_bytes(b"native")
+    foreign.write_bytes(b"foreign")
+    monkeypatch.setattr(
+        build_bundle,
+        "binary_architectures",
+        lambda path: {"x86_64"} if path == native else {"aarch64"},
+    )
+
+    build_bundle._prune_foreign_native_binaries(app_bin, "windows", "x86_64")
+
+    assert native.is_file()
+    assert not foreign.exists()
+
+
 def test_windows_arm_link_does_not_add_x86_shim(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

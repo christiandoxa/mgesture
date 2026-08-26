@@ -18,6 +18,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "release"))
 
 from release_targets import target  # noqa: E402
+from validate_architecture import (  # noqa: E402
+    _native_candidate,
+    binary_architectures,
+)
+from validate_architecture import validate_bundle as validate_bundle_architecture  # noqa: E402
 from validate_mojo_abi import validate as validate_mojo_abi  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
@@ -58,6 +63,17 @@ def _mojo_compiler_version(required: bool) -> str:
     if required:
         raise RuntimeError("native Mojo compiler provenance metadata is unavailable")
     return "not-used"
+
+
+def _prune_foreign_native_binaries(app_bin: Path, target_os: str, target_architecture: str) -> None:
+    for path in app_bin.rglob("*"):
+        if not path.is_file() or not _native_candidate(path, target_os):
+            continue
+        architectures = binary_architectures(path)
+        if architectures is None:
+            raise RuntimeError(f"native candidate has an unknown binary format: {path}")
+        if target_architecture not in architectures:
+            path.unlink()
 
 
 def build(
@@ -122,6 +138,7 @@ def build(
         app_bin = bundle / "bin"
         app_bin.parent.mkdir(parents=True)
         shutil.copytree(dist / "mgesture", app_bin)
+        _prune_foreign_native_binaries(app_bin, release_target.os, release_target.architecture)
         share = bundle / "share" / "mgesture"
         (share / "models").mkdir(parents=True)
         shutil.copy2(model, share / "models" / "hand_landmarker.task")
@@ -259,6 +276,7 @@ def build(
         (share / "release-metadata.json").write_text(
             json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
         )
+        validate_bundle_architecture(target_name, bundle)
         shutil.copy2(ROOT / "install.sh", bundle / "install.sh")
         shutil.copy2(ROOT / "install.ps1", bundle / "install.ps1")
         archive_output = output.with_name(f".{output.name}.{os.getpid()}.tmp")

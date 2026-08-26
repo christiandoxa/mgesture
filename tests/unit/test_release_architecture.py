@@ -33,6 +33,10 @@ def test_normalize_architecture(alias: str, expected: str) -> None:
             b"MZ" + bytes(58) + struct.pack("<I", 64) + b"PE\0\0" + struct.pack("<H", 0xAA64),
             {"aarch64"},
         ),
+        (
+            b"MZ" + bytes(58) + struct.pack("<I", 64) + b"PE\0\0" + struct.pack("<H", 0x014C),
+            {"i386"},
+        ),
         (b"\xcf\xfa\xed\xfe" + struct.pack("<I", 0x01000007), {"x86_64"}),
         (b"\xcf\xfa\xed\xfe" + struct.pack("<I", 0x0100000C), {"aarch64"}),
     ],
