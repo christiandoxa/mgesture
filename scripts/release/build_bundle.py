@@ -149,10 +149,10 @@ def build(
             validate_mojo_abi(target_name, mojo_library)
             mojo_runtime = bundle / "runtime" / "mojo"
             mojo_runtime.mkdir(parents=True)
-            shutil.copy2(
-                mojo_library,
-                mojo_runtime / native_library_name(release_target.os),
-            )
+            bundled_mojo_library = mojo_runtime / native_library_name(release_target.os)
+            shutil.copy2(mojo_library, bundled_mojo_library)
+            if not bundled_mojo_library.is_file():
+                raise RuntimeError(f"native Mojo library was not staged: {bundled_mojo_library}")
         source_dir = share / "mojo"
         source_dir.mkdir(parents=True)
         for source_path in mojo_source_paths(ROOT / "mojo"):
@@ -243,7 +243,11 @@ def build(
                 "mojo" if native_mojo else "auto",
             ],
             cwd=bundle,
-            env={**os.environ, "MGESTURE_BUNDLE_ROOT": str(bundle)},
+            env={
+                **os.environ,
+                "MGESTURE_BUNDLE_ROOT": str(bundle),
+                **({"MGESTURE_MOJO_LIBRARY": str(bundled_mojo_library)} if native_mojo else {}),
+            },
             check=True,
         )
         metadata["gesture_engine"]["self_test"] = "passed"
@@ -265,6 +269,16 @@ def build(
                 with tarfile.open(archive_output, "w:gz") as archive:
                     archive.add(bundle, arcname="mgesture")
             os.replace(archive_output, output)
+            if native_mojo:
+                member = f"mgesture/runtime/mojo/{native_library_name(release_target.os)}"
+                if output.suffix == ".zip":
+                    with zipfile.ZipFile(output) as archive:
+                        present = member in archive.namelist()
+                else:
+                    with tarfile.open(output, "r:gz") as archive:
+                        present = member in archive.getnames()
+                if not present:
+                    raise RuntimeError(f"archive is missing bundled native Mojo library: {member}")
         finally:
             archive_output.unlink(missing_ok=True)
     return output

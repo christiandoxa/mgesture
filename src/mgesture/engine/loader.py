@@ -29,7 +29,9 @@ def _load_mojo(config: EngineConfig, armed: bool) -> GestureEngine:
                 f"native Mojo engine unavailable: {library.name} failed ABI/load validation: {exc}"
             ) from exc
     if standalone is not None:
-        raise EngineUnavailableError(f"standalone bundle is missing {native_library_name()}")
+        raise EngineUnavailableError(
+            f"standalone bundle {standalone} is missing {native_library_name()}"
+        )
     if sys.platform == "win32":
         raise EngineUnavailableError(
             "native Mojo engine is unavailable on Windows; use --engine python"
