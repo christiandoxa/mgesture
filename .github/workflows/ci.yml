@@ -121,7 +121,7 @@ jobs:
         run: pixi run python scripts/release/check_mojo_unavailable.py --target ${{ matrix.target }}
       - name: Show Mojo version
         if: matrix.mojo_ci_mode == 'native'
-        run: mojo --version
+        run: pixi run mojo --version
       - name: Compile Mojo
         if: matrix.mojo_ci_mode == 'native'
         run: pixi run mojo-build
