@@ -26,6 +26,15 @@ class ReleaseTarget:
     python_fallback: bool
 
 
+def normalize_architecture(machine: str) -> str:
+    normalized = machine.strip().lower()
+    if normalized in ("x86_64", "amd64", "x64"):
+        return "x86_64"
+    if normalized in ("aarch64", "arm64"):
+        return "aarch64"
+    return normalized
+
+
 def current_target() -> str:
     system = platform.system()
     machine = platform.machine().lower()
@@ -40,13 +49,7 @@ def current_target() -> str:
                 machine = {9: "amd64", 12: "arm64"}[int.from_bytes(native_info.raw[:2], "little")]
             except KeyError as exc:
                 raise RuntimeError("unsupported native Windows architecture") from exc
-    arch = (
-        "x86_64"
-        if machine in ("x86_64", "amd64", "x64")
-        else "aarch64"
-        if machine in ("aarch64", "arm64")
-        else machine
-    )
+    arch = normalize_architecture(machine)
     if system == "Linux":
         return f"{arch}-unknown-linux-gnu"
     if system == "Darwin":

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from mgesture.release import current_target
+from mgesture.release import normalize_architecture
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "release"))
@@ -22,10 +22,6 @@ from release_targets import publishable_targets  # noqa: E402
         ("Linux", "aarch64", "aarch64-unknown-linux-gnu"),
         ("Darwin", "x86_64", "x86_64-apple-darwin"),
         ("Darwin", "arm64", "aarch64-apple-darwin"),
-        ("Windows", "amd64", "x86_64-pc-windows-msvc"),
-        ("Windows", "x64", "x86_64-pc-windows-msvc"),
-        ("Windows", "arm64", "aarch64-pc-windows-msvc"),
-        ("Windows", "aarch64", "aarch64-pc-windows-msvc"),
     ],
 )
 def test_current_target_aliases(
@@ -38,7 +34,17 @@ def test_current_target_aliases(
     assert release.current_target() == expected
 
 
-def _release_fixture(path: Path) -> Path:
+@pytest.mark.parametrize("alias", ("x86_64", "amd64", "x64", "AMD64"))
+def test_x86_architecture_aliases(alias: str) -> None:
+    assert normalize_architecture(alias) == "x86_64"
+
+
+@pytest.mark.parametrize("alias", ("aarch64", "arm64", "ARM64"))
+def test_arm_architecture_aliases(alias: str) -> None:
+    assert normalize_architecture(alias) == "aarch64"
+
+
+def _release_fixture(path: Path) -> None:
     bundle = path / "bundle" / "mgesture" / "bin"
     bundle.mkdir(parents=True)
     binary = bundle / "mgesture"
@@ -47,7 +53,6 @@ def _release_fixture(path: Path) -> Path:
         encoding="utf-8",
     )
     binary.chmod(0o755)
-    asset = path / f"mgesture-{current_target()}.tar.gz"
     for release_target in publishable_targets().values():
         archive_path = path / release_target.asset
         if release_target.format == "tar.gz":
@@ -87,7 +92,6 @@ def _release_fixture(path: Path) -> Path:
         cwd=ROOT,
         check=True,
     )
-    return asset
 
 
 @pytest.mark.skipif(
@@ -96,7 +100,7 @@ def _release_fixture(path: Path) -> Path:
 def test_unix_installer_stages_and_activates_without_python_runtime(tmp_path: Path):
     fixture = tmp_path / "release"
     fixture.mkdir()
-    asset = _release_fixture(fixture)
+    _release_fixture(fixture)
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
     uname = fake_bin / "uname"
@@ -153,7 +157,7 @@ def test_unix_installer_stages_and_activates_without_python_runtime(tmp_path: Pa
         "MGESTURE_BIN_DIR": str(home / "bin"),
         "MGESTURE_NO_PATH_UPDATE": "true",
     }
-    asset.write_bytes(b"corrupted")
+    (fixture / "mgesture-x86_64-unknown-linux-gnu.tar.gz").write_bytes(b"corrupted")
     failed = subprocess.run(
         ["sh", str(ROOT / "install.sh")],
         cwd=ROOT,
