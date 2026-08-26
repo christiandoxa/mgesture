@@ -15,14 +15,14 @@ mojo_source = true
 mojo_ci_mode = "native"
 mojo_build_mode = "native"
 python_engine = true
-native_mojo_engine = false
-runtime_default = "python-reference"
+native_mojo_engine = true
+runtime_default = "mojo"
 native_smoke = true
 minimum_glibc = "2.38"
 minimum_os = "glibc >= 2.38"
 publishable = true
-status = "buildable-on-linux; hardware validation pending"
-notes = "CPU fallback is complete; Mojo is not bundled until a compiler-free redistributable extension build is verified."
+status = "native-mojo-verified-on-matching-runner; hardware validation pending"
+notes = "The compiler-free Mojo ABI library is bundled and smoke-tested on native Linux x86_64; camera and input validation remain manual."
 
 [[target]]
 name = "aarch64-unknown-linux-gnu"
@@ -38,14 +38,14 @@ mojo_source = true
 mojo_ci_mode = "native"
 mojo_build_mode = "native"
 python_engine = true
-native_mojo_engine = false
-runtime_default = "python-reference"
+native_mojo_engine = true
+runtime_default = "mojo"
 native_smoke = true
 minimum_glibc = "2.28"
 minimum_os = "glibc >= 2.28"
 publishable = true
-status = "buildable-on-linux-arm64; hardware validation pending"
-notes = "CPU fallback is complete; matching ARM64 package and standalone smoke run on Linux ARM64; camera and input validation remain manual."
+status = "native-mojo-verified-on-matching-runner; hardware validation pending"
+notes = "The compiler-free Mojo ABI library is bundled and smoke-tested on native Linux ARM64; camera and input validation remain manual."
 
 [[target]]
 name = "x86_64-apple-darwin"
@@ -61,14 +61,14 @@ mojo_source = true
 mojo_ci_mode = "native"
 mojo_build_mode = "cross-object"
 python_engine = true
-native_mojo_engine = false
-runtime_default = "python-reference"
+native_mojo_engine = true
+runtime_default = "mojo"
 native_smoke = true
 minimum_glibc = "n/a"
 minimum_os = "macOS 13 or newer"
 publishable = true
-status = "buildable-on-macos-x86_64; hardware validation pending"
-notes = "CPU fallback is complete; matching Intel macOS package and standalone smoke run on macOS x86_64; camera and Accessibility validation remain manual."
+status = "native-mojo-verified-on-matching-runner; hardware validation pending"
+notes = "The compiler-free Mojo ABI library is bundled and smoke-tested on native Intel macOS; camera and Accessibility validation remain manual."
 
 [[target]]
 name = "aarch64-apple-darwin"
@@ -84,14 +84,14 @@ mojo_source = true
 mojo_ci_mode = "native"
 mojo_build_mode = "native"
 python_engine = true
-native_mojo_engine = false
-runtime_default = "python-reference"
+native_mojo_engine = true
+runtime_default = "mojo"
 native_smoke = true
 minimum_glibc = "n/a"
 minimum_os = "macOS 13 or newer"
 publishable = true
-status = "buildable-on-macos; hardware validation pending"
-notes = "CPU fallback is complete; package and standalone smoke run on Apple Silicon; camera and Accessibility validation remain manual."
+status = "native-mojo-verified-on-matching-runner; hardware validation pending"
+notes = "The compiler-free Mojo ABI library is bundled and smoke-tested on native Apple Silicon; camera and Accessibility validation remain manual."
 
 [[target]]
 name = "x86_64-pc-windows-msvc"
@@ -107,14 +107,14 @@ mojo_source = true
 mojo_ci_mode = "native"
 mojo_build_mode = "cross-object"
 python_engine = true
-native_mojo_engine = false
-runtime_default = "python-reference"
+native_mojo_engine = true
+runtime_default = "mojo"
 native_smoke = true
 minimum_glibc = "n/a"
 minimum_os = "Windows 10 or newer"
 publishable = true
-status = "buildable-on-windows; hardware validation pending"
-notes = "CPU fallback is complete; package and standalone smoke run on native Windows; camera and SendInput validation remain manual."
+status = "native-mojo-verified-on-matching-runner; hardware validation pending"
+notes = "The compiler-free Mojo ABI library is bundled and smoke-tested on native Windows x86_64; camera and SendInput validation remain manual."
 
 [[target]]
 name = "aarch64-pc-windows-msvc"
@@ -130,11 +130,11 @@ mojo_source = true
 mojo_ci_mode = "native"
 mojo_build_mode = "cross-object"
 python_engine = true
-native_mojo_engine = false
-runtime_default = "python-reference"
+native_mojo_engine = true
+runtime_default = "mojo"
 native_smoke = true
 minimum_glibc = "n/a"
 minimum_os = "Windows 10 or newer"
 publishable = true
-status = "buildable-on-windows-arm64; hardware validation pending"
-notes = "CPU fallback is complete; native Windows ARM64 uses a pinned OpenCV source build; camera and SendInput validation remain manual."
+status = "native-mojo-verified-on-matching-runner; hardware validation pending"
+notes = "The compiler-free Mojo ABI library is bundled and smoke-tested on native Windows ARM64; camera and SendInput validation remain manual."

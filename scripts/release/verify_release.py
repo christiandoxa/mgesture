@@ -33,6 +33,9 @@ def archive_file_digest(path: Path, archive_format: str, member_suffix: str) -> 
         with zipfile.ZipFile(path) as archive:
             member = next(name for name in archive.namelist() if name.endswith(member_suffix))
             handle = archive.open(member)
+            with handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest_value.update(chunk)
     else:
         with tarfile.open(path, "r:gz") as archive:
             member = next(
@@ -41,9 +44,9 @@ def archive_file_digest(path: Path, archive_format: str, member_suffix: str) -> 
             handle = archive.extractfile(member)
             if handle is None:
                 raise ValueError(f"archive member cannot be read: {member_suffix}")
-    with handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest_value.update(chunk)
+            with handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest_value.update(chunk)
     return digest_value.hexdigest()
 
 

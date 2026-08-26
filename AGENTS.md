@@ -138,7 +138,7 @@ Hardware validation uses `pixi run python -m mgesture doctor --json`; real webca
 ## Mojo compatibility rules
 
 - Pin stable Mojo `1.0.0` where the target Pixi platform provides it.
-- The canonical Mojo source is first-class for all six release targets. Native Mojo compiler/runtime availability is target-specific: current native source CI covers Linux x86_64, Linux ARM64, and Apple Silicon; Windows and Intel macOS use the Python runtime.
+- The canonical Mojo source is first-class for all six release targets. Every stable standalone target ships a prebuilt native Mojo gesture engine generated from that source and the Python runtime fallback; compiler availability on the build host is independent of end-user runtime availability.
 - `mojo_source` means the maintained, parity-tested implementation is present and released; `native_mojo_engine` means a compiler-free native engine is bundled and has executed on the matching target. Never conflate these fields or set source availability false because a compiler is unavailable.
 - Follow current official syntax and Python binding limits; keep the binding small and below six PythonObject parameters.
 - Compile every meaningful Mojo change with `mojo build` and run Mojo tests.
@@ -165,6 +165,12 @@ Hardware validation uses `pixi run python -m mgesture doctor --json`; real webca
 - Installers verify `SHA256SUMS`, `release-manifest.json`, `release-manifest.tsv`, staged version output, and the headless fake-input self-test before atomic activation.
 - `release/targets.toml` is the single canonical target matrix; unsupported rows are explicit and not published.
 - Every stable target must declare `standalone = true`, `vision = true`, `mojo_source = true`, and `python_engine = true`. Native Mojo is enabled only after the official toolchain builds it and the packaged engine executes on the matching native runner.
+- Every stable standalone target includes a prebuilt native Mojo gesture engine and the Python reference fallback.
+- Stable release target count is six and native Mojo engine count is also six.
+- Never remove the packaged Mojo engine from one target solely to make release CI pass.
+- `--engine mojo` must be validated from the final extracted standalone bundle on every release target.
+- Native Mojo availability is established by executable machine code generated from the canonical `.mojo` source, not by documentation, source presence, or Python fallback.
+- The native Mojo ABI is versioned and must remain backward-compatible within the documented compatibility policy.
 - Standalone bundles include the canonical Mojo source and its deterministic source hash; source files are not a second editable implementation.
 - Release bundles include the CPU reference runtime and pinned model where the target is publishable. GPU drivers remain external system dependencies; CPU fallback is always present.
 - Build and packaged smoke tests must pass before publication. Release artifacts are executed after packaging.

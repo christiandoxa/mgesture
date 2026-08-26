@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mgesture import __version__
 from mgesture.release import mojo_source_metadata, normalize_architecture
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,7 +58,8 @@ def test_stable_targets_expose_all_source_capabilities() -> None:
     assert source["available"] is True
     assert "mgesture_core.mojo" in source["files"]
     assert len(str(source["sha256"])) == 64
-    assert all(isinstance(target.native_mojo_engine, bool) for target in targets.values())
+    assert all(target.native_mojo_engine for target in targets.values())
+    assert {target.runtime_default for target in targets.values()} == {"mojo"}
 
 
 def test_mojo_source_hash_is_line_ending_independent(tmp_path: Path) -> None:
@@ -191,11 +193,12 @@ def test_readme_capability_table_matches_target_matrix() -> None:
 
 
 def _release_fixture(path: Path) -> None:
+    version = __version__
     bundle = path / "bundle" / "mgesture" / "bin"
     bundle.mkdir(parents=True)
     binary = bundle / "mgesture"
     binary.write_text(
-        "#!/bin/sh\ncase \"$1\" in --version) echo 'mgesture 0.1.0';; *) exit 0;; esac\n",
+        f"#!/bin/sh\ncase \"$1\" in --version) echo 'mgesture {version}';; *) exit 0;; esac\n",
         encoding="utf-8",
     )
     binary.chmod(0o755)
@@ -203,6 +206,11 @@ def _release_fixture(path: Path) -> None:
     runtime.mkdir(parents=True)
     for name in ("libmgesture_mojo.so", "libmgesture_mojo.dylib", "mgesture_mojo.dll"):
         (runtime / name).write_bytes(b"native Mojo fixture")
+    metadata = path / "bundle" / "mgesture" / "share" / "mgesture"
+    metadata.mkdir(parents=True)
+    (metadata / "release-metadata.json").write_text(
+        '{"mojo_compiler_version": "Mojo 1.0.0 (fixture)"}\n', encoding="utf-8"
+    )
     for release_target in publishable_targets().values():
         archive_path = path / release_target.asset
         if release_target.format == "tar.gz":
@@ -222,7 +230,7 @@ def _release_fixture(path: Path) -> None:
             sys.executable,
             "scripts/release/render_manifest.py",
             "--version",
-            "0.1.0",
+            version,
             "--commit",
             "0" * 40,
             "--assets",
@@ -238,7 +246,7 @@ def _release_fixture(path: Path) -> None:
             sys.executable,
             "scripts/release/sbom.py",
             "--version",
-            "0.1.0",
+            version,
             "--assets",
             str(path),
             "--output",
@@ -256,7 +264,7 @@ def _release_fixture(path: Path) -> None:
             "scripts/release/verify_release.py",
             str(path),
             "--version",
-            "0.1.0",
+            version,
         ],
         cwd=ROOT,
         check=True,
@@ -311,7 +319,7 @@ def test_unix_installer_stages_and_activates_without_python_runtime(tmp_path: Pa
             subprocess.run(
                 [str(command), "--version"], env=env, capture_output=True, text=True, check=True
             ).stdout.strip()
-            == "mgesture 0.1.0"
+            == f"mgesture {__version__}"
         )
         assert (home / "app" / "current").is_symlink()
     home = tmp_path / "failed-home"
