@@ -55,6 +55,8 @@ The six rows are built and smoke-tested on matching native GitHub runners for ea
 
 The canonical Mojo source is compiled and parity-tested on supported Linux x86_64/ARM64 and Apple Silicon hosts. The current standalone packaging does not bundle Mojo runtime libraries, so `--engine auto` safely uses Python and explicit `--engine mojo` remains unavailable in standalone packages. Camera, Accessibility, and real-pointer behavior still require manual hardware validation.
 
+CI presents both Python and Mojo validation for all six targets. Mojo jobs use native compilation where the official toolchain supports the runner and source-contract/fallback validation elsewhere; no target is removed from the Mojo matrix.
+
 ## Status
 
 The current version contains a runnable CLI, deterministic Python engine, fake-backend replay, explicit model management, bounded camera/MediaPipe pipeline, Linux X11/Wayland-uinput/Windows/macOS adapters, centralized compute planning, and stable-Mojo build scaffolding. Hardware and cross-platform claims below are intentionally conservative; run `mgesture doctor` on the target machine.

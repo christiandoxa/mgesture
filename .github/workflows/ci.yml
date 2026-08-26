@@ -10,25 +10,30 @@ permissions:
   contents: read
 
 jobs:
+  prepare_matrix:
+    name: Prepare CI matrix
+    runs-on: ubuntu-24.04
+    outputs:
+      targets: ${{ steps.matrix.outputs.targets }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Generate canonical target matrix
+        id: matrix
+        run: |
+          targets="$(python3 scripts/release/prepare_ci_matrix.py)"
+          echo "targets=${targets}" >> "$GITHUB_OUTPUT"
+          echo "CI matrix: ${targets}"
+
   python:
+    needs: prepare_matrix
     name: Python ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-24.04
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
-          - target: x86_64-apple-darwin
-            os: macos-15-intel
-          - target: aarch64-apple-darwin
-            os: macos-14
-          - target: x86_64-pc-windows-msvc
-            os: windows-2025
-          - target: aarch64-pc-windows-msvc
-            os: windows-11-arm
+      matrix: ${{ fromJSON(needs.prepare_matrix.outputs.targets) }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -55,7 +60,7 @@ jobs:
         run: >-
           pixi run python -c
           "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
-          row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.os }}'"
+          row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.runner }}'"
       - name: Validate canonical Mojo source
         run: pixi run python scripts/release/validate_mojo_source.py
       - name: Test
@@ -77,18 +82,12 @@ jobs:
         run: pixi run python scripts/release/check_mojo_unavailable.py
 
   mojo:
+    needs: prepare_matrix
     name: Mojo ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-24.04
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
-          - target: aarch64-apple-darwin
-            os: macos-14
+      matrix: ${{ fromJSON(needs.prepare_matrix.outputs.targets) }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -108,15 +107,36 @@ jobs:
         run: >-
           pixi run python -c
           "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
-          row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.os }}'"
+          row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.runner }}' and row.mojo_ci_mode == '${{ matrix.mojo_ci_mode }}'"
       - name: Validate canonical Mojo source
         run: pixi run python scripts/release/validate_mojo_source.py
+      - name: Summarize Mojo validation mode
+        env:
+          TARGET: ${{ matrix.target }}
+          MODE: ${{ matrix.mojo_ci_mode }}
+        run: |
+          pixi run python -c "import os; from pathlib import Path; n=chr(10); mode=os.environ['MODE']; Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('## Mojo validation'+n+n+'- Target: '+os.environ['TARGET']+n+'- Mojo source: available'+n+'- Validation mode: '+mode+n+'- Native Mojo runtime: '+('available' if mode == 'native' else 'unavailable')+n+'- Python fallback: available'+n)"
+      - name: Validate expected native Mojo unavailability
+        if: matrix.mojo_ci_mode == 'source-contract'
+        run: pixi run python scripts/release/check_mojo_unavailable.py --target ${{ matrix.target }}
+      - name: Show Mojo version
+        if: matrix.mojo_ci_mode == 'native'
+        run: mojo --version
       - name: Compile Mojo
+        if: matrix.mojo_ci_mode == 'native'
         run: pixi run mojo-build
       - name: Mojo tests
+        if: matrix.mojo_ci_mode == 'native'
         run: pixi run mojo-test
-      - name: Python tests
+      - name: Python/Mojo parity tests
+        if: matrix.mojo_ci_mode == 'native'
+        run: pixi run pytest -q tests/unit/test_mojo_parity.py
+      - name: Deterministic reference tests
         run: pixi run test
+      - name: Headless fake-input self-test
+        run: pixi run python -m mgesture self-test --headless --fake-input
+      - name: Deterministic replay
+        run: pixi run replay
 
   release-dry-run:
     name: Standalone Linux dry run
