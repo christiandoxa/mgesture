@@ -56,6 +56,8 @@ jobs:
           pixi run python -c
           "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
           row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.os }}'"
+      - name: Validate canonical Mojo source
+        run: pixi run python scripts/release/validate_mojo_source.py
       - name: Test
         run: pixi run test
       - name: Headless fake-input self-test
@@ -83,6 +85,8 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
           - target: aarch64-apple-darwin
             os: macos-14
     steps:
@@ -105,6 +109,8 @@ jobs:
           pixi run python -c
           "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
           row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.os }}'"
+      - name: Validate canonical Mojo source
+        run: pixi run python scripts/release/validate_mojo_source.py
       - name: Compile Mojo
         run: pixi run mojo-build
       - name: Mojo tests

@@ -17,6 +17,9 @@ evdev = ">=1.7,<2"
 [target.linux-aarch64.pypi-dependencies]
 evdev = ">=1.7,<3"
 
+[target.linux-aarch64.dependencies]
+mojo = "==1.0.0"
+
 [target.win-arm64.dependencies]
 python = "3.14.*"
 cmake = ">=4.4,<5"
@@ -46,7 +49,7 @@ replay = "python -m mgesture replay"
 benchmark = "python -m mgesture benchmark --compare"
 build = "python -m build"
 validate-version = "python scripts/release/validate_version.py"
-release-check = "python scripts/release/validate_version.py && python scripts/release/verify_release.py --help"
+release-check = "python scripts/release/validate_version.py && python scripts/release/validate_mojo_source.py && python scripts/release/verify_release.py --help"
 package-local = "python scripts/release/build_bundle.py --target x86_64-unknown-linux-gnu --output dist/mgesture-x86_64-unknown-linux-gnu.tar.gz"
 smoke-standalone = "python -m mgesture self-test --headless --fake-input"
 sbom = "python scripts/release/sbom.py --output dist/mgesture-sbom.spdx.json"

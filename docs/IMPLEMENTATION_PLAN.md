@@ -10,4 +10,4 @@
 
 The first manual validation target is this Zorin OS 18.1 x86_64 X11 machine. No other platform or hardware result is claimed until it is run.
 
-Current verification has reached the Linux source/runtime path: Python tests, Mojo extension build/native test, Python/Mojo parity, GPU/CPU inference benchmark, local camera open/read, GPU delegate initialization, standalone extraction, installer fixture install/rollback checksum failure, and safe fake-input runtime smoke. GitHub CI has been authored but not executed from this workspace.
+Current verification covers the Linux source/runtime path locally and the six native release lanes in GitHub CI: Python tests, Mojo extension build/native test, Python/Mojo parity, GPU/CPU inference benchmark, standalone extraction, installer fixture install/rollback checksum failure, and safe fake-input runtime smoke. Camera and real-pointer claims remain manual hardware checks.

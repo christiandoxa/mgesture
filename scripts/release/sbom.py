@@ -6,8 +6,14 @@ import importlib.metadata
 import json
 import os
 import platform
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "src"))
+
+from mgesture.release import mojo_source_metadata  # noqa: E402
 
 
 def runtime_version(root: Path) -> str:
@@ -35,6 +41,19 @@ def generate(output: Path, version: str) -> None:
                 "licenseDeclared": "NOASSERTION",
             }
         )
+    source = mojo_source_metadata(ROOT / "mojo")
+    packages.append(
+        {
+            "SPDXID": "SPDXRef-Package-mgesture-mojo-source",
+            "name": "mgesture-mojo-source",
+            "versionInfo": str(source["sha256"]),
+            "downloadLocation": "https://github.com/christiandoxa/mgesture/tree/main/mojo",
+            "licenseConcluded": "Apache-2.0",
+            "licenseDeclared": "Apache-2.0",
+            "filesAnalyzed": False,
+            "comment": "Canonical Mojo source files: " + ", ".join(source["files"]),
+        }
+    )
     document = {
         "spdxVersion": "SPDX-2.3",
         "dataLicense": "CC0-1.0",

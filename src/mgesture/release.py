@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import os
 import platform
@@ -22,8 +23,27 @@ _VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[+-][0-9A
 class ReleaseTarget:
     name: str
     asset: str
-    implementation: str
-    python_fallback: bool
+    runtime_default: str
+    python_engine: bool
+
+
+def mojo_source_paths(source_dir: Path | None = None) -> tuple[Path, ...]:
+    directory = source_dir or Path(__file__).resolve().parents[2] / "mojo"
+    return tuple(sorted(path for path in directory.glob("*.mojo") if path.is_file()))
+
+
+def mojo_source_metadata(source_dir: Path | None = None) -> dict[str, object]:
+    files = mojo_source_paths(source_dir)
+    digest = hashlib.sha256()
+    for path in files:
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+    return {
+        "available": bool(files),
+        "sha256": digest.hexdigest() if files else "",
+        "files": [path.name for path in files],
+    }
 
 
 def normalize_architecture(machine: str) -> str:
@@ -97,8 +117,8 @@ def resolve_release(release: str = "latest", target: str | None = None) -> dict[
         "asset": ReleaseTarget(
             target,
             asset,
-            str(row.get("implementation", "")),
-            bool(row.get("python_fallback", False)),
+            str(row.get("runtime_default", row.get("implementation", ""))),
+            bool(row.get("python_engine_available", row.get("python_fallback", False))),
         ),
         "base_url": release_base_url(release),
     }
@@ -122,13 +142,28 @@ def runtime_metadata() -> dict[str, Any]:
             value = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(value, dict):
                 return cast(dict[str, Any], value)
+    source = mojo_source_metadata()
     return {
         "version": __version__,
         "commit": "source-tree",
         "target": current_target(),
         "standalone": False,
+        "runtime_default": "auto",
         "implementation": "mojo-source-or-python-fallback",
         "compiler_required": False,
+        "mojo_source_available": bool(source["available"]),
+        "mojo_source_sha256": str(source["sha256"]),
+        "mojo_source_files": source["files"],
+        "native_mojo_engine_available": False,
+        "native_mojo_engine_loaded": False,
+        "python_engine_available": True,
+        "mojo": {
+            "source_available": bool(source["available"]),
+            "source_sha256": str(source["sha256"]),
+            "source_files": source["files"],
+            "native_engine_available": False,
+            "native_engine_loaded": False,
+        },
         "gesture_engine": {
             "implementation": "mojo-source-or-python-fallback",
             "compiler_required": False,

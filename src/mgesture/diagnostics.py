@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .compute import capabilities_dict, detect_hardware, select_compute_plan
 from .config import AppConfig, config_path, validate
+from .engine import EngineConfig, EngineUnavailableError, create_engine
 from .input import create_backend
 from .release import runtime_metadata
 from .self_test import run_self_test
@@ -54,6 +55,47 @@ def _mojo_version() -> str:
         [command, "--version"], capture_output=True, text=True, timeout=5, check=False
     )
     return (result.stdout or result.stderr).strip() or "unavailable"
+
+
+def _engine_capabilities(
+    metadata: dict[str, object], requested: str, probe: bool
+) -> dict[str, object]:
+    requested = requested.lower()
+    nested = metadata.get("mojo")
+    nested_mojo = nested if isinstance(nested, dict) else {}
+    source_available = metadata.get("mojo_source_available") is True or (
+        nested_mojo.get("source_available") is True
+    )
+    native_available = metadata.get("native_mojo_engine_available") is True or (
+        nested_mojo.get("native_engine_available") is True
+    )
+    native_loaded = metadata.get("native_mojo_engine_loaded") is True or (
+        nested_mojo.get("native_engine_loaded") is True
+    )
+    if probe and metadata.get("standalone") is not True:
+        if os.environ.get("MGESTURE_ENGINE", "auto").lower() != "python":
+            try:
+                engine = create_engine("mojo", EngineConfig(), armed=False)
+            except EngineUnavailableError:
+                pass
+            else:
+                native_available = engine.name == "mojo"
+                native_loaded = native_available
+    python_available = metadata.get("python_engine_available", True) is True
+    active = (
+        "python"
+        if requested == "python" or (requested == "auto" and not native_loaded)
+        else "mojo"
+        if native_loaded
+        else "unavailable"
+    )
+    return {
+        "mojo_source_available": source_available,
+        "native_mojo_engine_available": native_available,
+        "native_mojo_engine_loaded": native_loaded,
+        "python_engine_available": python_available,
+        "active_engine": active,
+    }
 
 
 def _camera_check(index: int) -> Check:
@@ -101,6 +143,10 @@ def collect_checks(
     mojo_version = _mojo_version()
     hardware = detect_hardware()
     engine_request = os.environ.get("MGESTURE_ENGINE", config.input.engine)
+    metadata = runtime_metadata()
+    engine_status = _engine_capabilities(
+        metadata, engine_request, probe=metadata.get("standalone") is not True
+    )
     compute_request = os.environ.get("MGESTURE_COMPUTE", config.compute.mode)
     try:
         compute_plan = select_compute_plan(compute_request, hardware, config.input.engine)
@@ -173,9 +219,14 @@ def collect_checks(
     )
     checks.append(
         Check(
-            "gesture engine",
+            "gesture engines",
             True,
-            f"requested={engine_request}; mojo={mojo_version != 'unavailable'}",
+            "requested="
+            f"{engine_request}; Mojo source={'available' if engine_status['mojo_source_available'] else 'unavailable'}; "
+            f"Mojo native runtime={'available' if engine_status['native_mojo_engine_available'] else 'unavailable'}; "
+            f"loaded={'yes' if engine_status['native_mojo_engine_loaded'] else 'no'}; "
+            f"Python engine={'available' if engine_status['python_engine_available'] else 'unavailable'}; "
+            f"active={engine_status['active_engine']}",
         )
     )
     checks.append(
@@ -280,6 +331,8 @@ def collect_checks(
 def report_json(config: AppConfig, checks: list[Check], runtime: bool = False) -> dict[str, object]:
     hardware = detect_hardware()
     request = os.environ.get("MGESTURE_COMPUTE", config.compute.mode)
+    engine_request = os.environ.get("MGESTURE_ENGINE", config.input.engine)
+    metadata = runtime_metadata()
     try:
         plan = select_compute_plan(request, hardware, config.input.engine)
         plan_data: dict[str, object] = {
@@ -292,6 +345,11 @@ def report_json(config: AppConfig, checks: list[Check], runtime: bool = False) -
         }
     except (RuntimeError, ValueError) as exc:
         plan_data = {"requested": request, "error": str(exc)}
+    engine_status = _engine_capabilities(
+        metadata,
+        engine_request,
+        probe=metadata.get("standalone") is not True,
+    )
     result: dict[str, object] = {
         "checks": [
             {"name": check.name, "ok": check.ok, "detail": check.detail, "required": check.required}
@@ -300,9 +358,8 @@ def report_json(config: AppConfig, checks: list[Check], runtime: bool = False) -
         "hardware": capabilities_dict(hardware),
         "compute": {"mode": request, "plan": plan_data},
         "gesture_engine": {
-            "requested": os.environ.get("MGESTURE_ENGINE", config.input.engine),
-            "mojo_available": hardware.mojo_available,
-            "implementation": runtime_metadata().get("implementation", "python-reference"),
+            "requested": engine_request,
+            **engine_status,
         },
         "model": str(
             available_model(Path(config.vision.model_path))
@@ -312,9 +369,24 @@ def report_json(config: AppConfig, checks: list[Check], runtime: bool = False) -
         "configuration": str(config_path()),
     }
     if runtime:
-        metadata = runtime_metadata()
-        result["runtime"] = metadata
-        result["self_test"] = run_self_test(metadata.get("implementation") == "mojo-prebuilt")
+        runtime_metadata_value = dict(metadata)
+        runtime_metadata_value.update(
+            {
+                "mojo_source_available": engine_status["mojo_source_available"],
+                "native_mojo_engine_available": engine_status["native_mojo_engine_available"],
+                "native_mojo_engine_loaded": engine_status["native_mojo_engine_loaded"],
+                "python_engine_available": engine_status["python_engine_available"],
+            }
+        )
+        nested_runtime = runtime_metadata_value.get("mojo")
+        if isinstance(nested_runtime, dict):
+            runtime_metadata_value["mojo"] = {
+                **nested_runtime,
+                "native_engine_available": engine_status["native_mojo_engine_available"],
+                "native_engine_loaded": engine_status["native_mojo_engine_loaded"],
+            }
+        result["runtime"] = runtime_metadata_value
+        result["self_test"] = run_self_test()
     return result
 
 

@@ -15,7 +15,7 @@ The engine owns filtering, normalized palm-scale pinch distances, hysteresis, de
 
 `compute.py` detects hardware and produces an inference/gesture plan. MediaPipe GPU initialization is attempted only when the plan selects it; auto mode switches once to CPU if initialization fails. The small 21x3 gesture workload remains CPU/Mojo unless total measurements prove otherwise. `vision/scheduler.py` uses blocking camera reads plus a bounded adaptive rate, reducing work when paused or no hand is tracked.
 
-The Mojo boundary is intentionally small: one persistent engine, one frame call, contiguous landmark data, and compact action results. Current Mojo Python bindings are beta, so source import/build is explicit and strict mode reports its compiler/import error instead of pretending Mojo is active.
+The Mojo boundary is intentionally small: one persistent engine, one frame call, contiguous landmark data, and compact action results. The canonical `.mojo` sources are architecture-independent, included in source distributions and standalone bundles, and recorded with one deterministic source hash. Current Mojo Python bindings are beta, so source import/build is explicit and strict mode reports its compiler/import error instead of pretending Mojo is active. Source availability is therefore distinct from a compiler-free native engine bundled in a release.
 
 The current binding reuses a contiguous Python `array('f')` destination and performs one measured float32 conversion per Mojo frame; current stable bindings do not provide a verified zero-copy path for this object. This conversion cost is measured in the core benchmark and is kept to one call per frame. No unsafe zero-copy claim is made.
 

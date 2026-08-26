@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "release"))
 from release_targets import publishable_targets  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
+from mgesture.release import mojo_source_metadata  # noqa: E402
 from mgesture.vision.model_manager import MODEL_SHA256  # noqa: E402
 
 
@@ -67,12 +68,22 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
     if version != runtime_version():
         raise ValueError(f"manifest version {version} does not match runtime {runtime_version()}")
     targets = publishable_targets()
+    source_metadata = mojo_source_metadata()
+    if not source_metadata["available"]:
+        raise RuntimeError("canonical Mojo production source is missing")
     rows: dict[str, dict[str, object]] = {}
     for name, target in targets.items():
         asset_path = assets / target.asset
         if not asset_path.exists():
             raise RuntimeError(f"missing required target asset: {target.asset}")
         metadata = archive_metadata(asset_path, target.format)
+        mojo_source_sha256 = str(metadata.get("mojo_source_sha256", source_metadata["sha256"]))
+        mojo_source_files = metadata.get("mojo_source_files", source_metadata["files"])
+        vision_backend = str(metadata.get("vision_backend", "mediapipe"))
+        runtime_default = str(metadata.get("runtime_default", target.runtime_default))
+        native_mojo_engine = bool(
+            metadata.get("native_mojo_engine_available", target.native_mojo_engine)
+        )
         rows[name] = {
             "target": name,
             "asset": target.asset,
@@ -80,24 +91,38 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
             "os": target.os,
             "arch": target.architecture,
             "native": bool(metadata.get("native", True)),
+            "standalone": target.standalone,
+            "vision_available": target.vision,
+            "vision_backend": vision_backend,
+            "mojo_source": target.mojo_source,
+            "mojo_source_sha256": mojo_source_sha256,
+            "mojo_source_files": mojo_source_files,
+            "native_mojo_engine": native_mojo_engine,
+            "python_engine_available": bool(
+                metadata.get("python_engine_available", target.python_engine)
+            ),
+            "runtime_default": runtime_default,
+            "mojo": {
+                "source_available": target.mojo_source,
+                "source_sha256": mojo_source_sha256,
+                "source_files": mojo_source_files,
+                "native_engine_available": native_mojo_engine,
+            },
+            "vision": {"available": target.vision, "implementation": vision_backend},
+            "python_engine": {"available": target.python_engine},
             "python_runtime": str(metadata.get("python_runtime", target.python)),
             "mediapipe_version": str(metadata.get("mediapipe_version", "not-recorded")),
-            "vision_backend": str(metadata.get("vision_backend", "mediapipe")),
-            "gesture_engine": str(metadata.get("gesture_engine_default", target.implementation)),
-            "mojo_available": bool(metadata.get("mojo_available", False)),
-            "python_engine_available": bool(
-                metadata.get("python_engine_available", target.python_fallback)
-            ),
+            "gesture_engine": runtime_default,
             "minimum_os": target.minimum_os,
             "package_format": target.format,
             "smoke_test": "native-package-smoke",
             "provenance": "github-actions-artifact-attestation",
-            "implementation": target.implementation,
-            "python_fallback": target.python_fallback,
-            "mojo_engine": target.mojo_engine,
+            "implementation": runtime_default,
+            "python_fallback": target.python_engine,
+            "mojo_engine": native_mojo_engine,
             "architecture": target.architecture,
             "runner": target.runner,
-            "mediapipe": target.mediapipe,
+            "mediapipe": target.vision,
             "format": target.format,
             "python": target.python,
             "minimum_glibc": target.minimum_glibc,

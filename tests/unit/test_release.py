@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from mgesture.release import normalize_architecture
+from mgesture.release import mojo_source_metadata, normalize_architecture
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "release"))
@@ -42,6 +42,61 @@ def test_x86_architecture_aliases(alias: str) -> None:
 @pytest.mark.parametrize("alias", ("aarch64", "arm64", "ARM64"))
 def test_arm_architecture_aliases(alias: str) -> None:
     assert normalize_architecture(alias) == "aarch64"
+
+
+def test_stable_targets_expose_all_source_capabilities() -> None:
+    targets = publishable_targets()
+    assert len(targets) == 6
+    assert all(
+        target.standalone and target.vision and target.mojo_source and target.python_engine
+        for target in targets.values()
+    )
+    source = mojo_source_metadata()
+    assert source["available"] is True
+    assert "mgesture_core.mojo" in source["files"]
+    assert len(str(source["sha256"])) == 64
+    assert any(target.mojo_source and not target.native_mojo_engine for target in targets.values())
+
+
+def test_readme_capability_table_matches_target_matrix() -> None:
+    labels = {
+        ("linux", "x86_64"): ("Linux", "x86_64"),
+        ("linux", "aarch64"): ("Linux", "ARM64"),
+        ("macos", "x86_64"): ("macOS", "Intel x86_64"),
+        ("macos", "aarch64"): ("macOS", "Apple Silicon ARM64"),
+        ("windows", "x86_64"): ("Windows", "x86_64"),
+        ("windows", "aarch64"): ("Windows", "ARM64"),
+    }
+    rows: dict[tuple[str, str], list[str]] = {}
+    in_table = False
+    for line in (ROOT / "README.md").read_text(encoding="utf-8").splitlines():
+        if line.startswith(
+            "| Platform | Architecture | Standalone | Vision | Mojo source | Python engine |"
+        ):
+            in_table = True
+            continue
+        if in_table and line.startswith("|---"):
+            continue
+        if in_table and line.startswith("|"):
+            fields = [field.strip() for field in line.strip("|").split("|")]
+            key = next(
+                (key for key, value in labels.items() if value == (fields[0], fields[1])),
+                None,
+            )
+            assert key is not None
+            rows[key] = fields
+            continue
+        if in_table:
+            break
+    targets = publishable_targets()
+    assert len(rows) == len(targets) == 6
+    for name, target in targets.items():
+        key = (target.os, target.architecture)
+        fields = rows[key]
+        assert fields[2] == ("Yes" if target.standalone else "No"), name
+        assert fields[3].startswith("Yes (" if target.vision else "No"), name
+        assert fields[4] == ("Yes" if target.mojo_source else "No"), name
+        assert fields[5] == ("Yes" if target.python_engine else "No"), name
 
 
 def _release_fixture(path: Path) -> None:

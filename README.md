@@ -2,7 +2,7 @@
 
 Local webcam hand gestures for safe desktop mouse control.
 
-mgesture keeps camera frames on the machine, starts paused, and converts one right-hand landmark stream into typed mouse actions. The Python engine is the reference behavior. Stable Mojo is optional on supported Linux/macOS environments; native Windows uses Python. Compute selection is independent: `--compute auto|gpu|cpu` controls vision inference, while `--engine auto|mojo|python` controls gesture processing.
+mgesture keeps camera frames on the machine, starts paused, and converts one right-hand landmark stream into typed mouse actions. The Python engine is the reference behavior and the canonical Mojo source is maintained for all six release targets. Native Mojo execution is a separate target-specific capability; standalone bundles always retain the Python engine and CPU fallback. Compute selection is independent: `--compute auto|gpu|cpu` controls vision inference, while `--engine auto|mojo|python` controls gesture processing.
 
 ## Installation
 
@@ -35,14 +35,25 @@ Standalone target availability is reported in [docs/PLATFORM_SUPPORT.md](docs/PL
 
 | Platform | Architecture | Standalone | Vision | Mojo source | Python engine |
 |---|---|---:|---|---:|---:|
-| Linux | x86_64 | Yes | MediaPipe | Yes | Yes |
-| Linux | ARM64 | Yes | MediaPipe | No | Yes |
-| macOS | Intel x86_64 | Yes | MediaPipe 0.10.21 | No | Yes |
-| macOS | Apple Silicon ARM64 | Yes | MediaPipe | Yes | Yes |
-| Windows | x86_64 | Yes | MediaPipe | No | Yes |
-| Windows | ARM64 | Yes | MediaPipe | No | Yes |
+| Linux | x86_64 | Yes | Yes (MediaPipe) | Yes | Yes |
+| Linux | ARM64 | Yes | Yes (MediaPipe 1.0.1) | Yes | Yes |
+| macOS | Intel x86_64 | Yes | Yes (MediaPipe 0.10.21) | Yes | Yes |
+| macOS | Apple Silicon ARM64 | Yes | Yes (MediaPipe 0.10.35) | Yes | Yes |
+| Windows | x86_64 | Yes | Yes (MediaPipe 0.10.35) | Yes | Yes |
+| Windows | ARM64 | Yes | Yes (MediaPipe 0.10.35) | Yes | Yes |
 
-The six rows are built and smoke-tested on matching native GitHub runners for each stable release. Mojo is optional and target-specific; every standalone bundle includes the Python reference engine and CPU fallback. Camera, Accessibility, and real-pointer behavior still require manual hardware validation.
+The six rows are built and smoke-tested on matching native GitHub runners for each stable release. Mojo source availability is a source/provenance capability; every standalone bundle includes the same canonical `.mojo` source and the Python reference engine with CPU fallback.
+
+| Platform | Architecture | Native Mojo engine in standalone bundle |
+|---|---|---:|
+| Linux | x86_64 | No |
+| Linux | ARM64 | No |
+| macOS | Intel x86_64 | No |
+| macOS | Apple Silicon ARM64 | No |
+| Windows | x86_64 | No |
+| Windows | ARM64 | No |
+
+The canonical Mojo source is compiled and parity-tested on supported Linux x86_64/ARM64 and Apple Silicon hosts. The current standalone packaging does not bundle Mojo runtime libraries, so `--engine auto` safely uses Python and explicit `--engine mojo` remains unavailable in standalone packages. Camera, Accessibility, and real-pointer behavior still require manual hardware validation.
 
 ## Status
 
@@ -144,6 +155,6 @@ Aplikasi mulai dalam keadaan jeda untuk mencegah klik tidak sengaja. Tekan Space
 
 ## Known limitations
 
-MediaPipe Python GPU delegate support is platform/package-specific and must initialize successfully; no GPU claim is made from hardware presence alone. Wayland uinput needs user permission and currently reports a primary 1920x1080 layout unless a platform-specific layout provider is added. Native Mojo is not claimed on Windows. Webcam and real-pointer behavior remain hardware/manual checks, not ordinary CI checks.
+MediaPipe Python GPU delegate support is platform/package-specific and must initialize successfully; no GPU claim is made from hardware presence alone. Wayland uinput needs user permission and currently reports a primary 1920x1080 layout unless a platform-specific layout provider is added. Windows and Intel macOS use the Python runtime because native Mojo is not currently available there; this does not remove the canonical Mojo source from those targets. Webcam and real-pointer behavior remain hardware/manual checks, not ordinary CI checks.
 
 License: Apache-2.0 for this project. MediaPipe and its model retain their upstream licenses and terms.

@@ -13,11 +13,13 @@ class Target:
     os: str
     asset: str
     format: str
+    standalone: bool
     python: str
-    mojo_engine: bool
-    implementation: str
-    python_fallback: bool
-    mediapipe: bool
+    vision: bool
+    mojo_source: bool
+    python_engine: bool
+    native_mojo_engine: bool
+    runtime_default: str
     native_smoke: bool
     minimum_glibc: str
     minimum_os: str
@@ -29,7 +31,14 @@ class Target:
 def load_targets(path: Path | None = None) -> dict[str, Target]:
     target_path = path or Path(__file__).resolve().parents[2] / "release" / "targets.toml"
     raw = tomllib.loads(target_path.read_text(encoding="utf-8"))
-    return {row["name"]: Target(**row) for row in raw.get("target", [])}
+    rows = raw.get("target", [])
+    names = [row["name"] for row in rows]
+    assets = [row["asset"] for row in rows]
+    if len(set(names)) != len(names):
+        raise ValueError("release target IDs must be unique")
+    if len(set(assets)) != len(assets):
+        raise ValueError("release target assets must be unique")
+    return {row["name"]: Target(**row) for row in rows}
 
 
 def target(name: str, path: Path | None = None) -> Target:

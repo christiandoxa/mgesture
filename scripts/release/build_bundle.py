@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "release"))
 from release_targets import target  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
+from mgesture.release import mojo_source_metadata, mojo_source_paths  # noqa: E402
 from mgesture.vision.model_manager import available_model  # noqa: E402
 
 
@@ -114,6 +115,11 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
             encoding="utf-8",
         )
         shutil.copy2(ROOT / "release/targets.toml", share / "targets.toml")
+        source_dir = share / "mojo"
+        source_dir.mkdir(parents=True)
+        for source_path in mojo_source_paths():
+            shutil.copy2(source_path, source_dir / source_path.name)
+        source_metadata = mojo_source_metadata()
         fixture = share / "fixtures" / "basic.json"
         fixture.parent.mkdir(parents=True)
         shutil.copy2(ROOT / "tests/fixtures/basic.json", fixture)
@@ -133,8 +139,16 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
             "os": release_target.os,
             "architecture": release_target.architecture,
             "native": True,
-            "standalone": True,
-            "implementation": release_target.implementation,
+            "standalone": release_target.standalone,
+            "vision_available": release_target.vision,
+            "mojo_source_available": release_target.mojo_source,
+            "mojo_source_sha256": str(source_metadata["sha256"]),
+            "mojo_source_files": source_metadata["files"],
+            "native_mojo_engine_available": release_target.native_mojo_engine,
+            "native_mojo_engine_loaded": False,
+            "python_engine_available": release_target.python_engine,
+            "runtime_default": release_target.runtime_default,
+            "implementation": release_target.runtime_default,
             "compiler_required": False,
             "python_runtime_bundled": True,
             "model_sha256": _sha256(model),
@@ -146,14 +160,20 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
             "mediapipe_version": mediapipe_version,
             "opencv_version": opencv_version,
             "vision_backend": "mediapipe",
-            "gesture_engine_default": release_target.implementation,
-            "mojo_available": False,
-            "python_engine_available": release_target.python_fallback,
             "minimum_os": release_target.minimum_os,
             "package_format": release_target.format,
             "mojo_version": "not bundled",
+            "mojo": {
+                "source_available": release_target.mojo_source,
+                "source_sha256": str(source_metadata["sha256"]),
+                "source_files": source_metadata["files"],
+                "native_engine_available": release_target.native_mojo_engine,
+                "native_engine_loaded": False,
+            },
+            "vision": {"available": release_target.vision, "implementation": "mediapipe"},
+            "python_engine": {"available": release_target.python_engine},
             "gesture_engine": {
-                "implementation": release_target.implementation,
+                "implementation": release_target.runtime_default,
                 "compiler_required": False,
                 "self_test": "pending-runtime-smoke",
             },

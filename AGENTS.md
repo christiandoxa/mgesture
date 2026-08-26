@@ -27,7 +27,7 @@ The repository uses a `src/` layout:
 - `src/mgesture/self_test.py` owns the headless packaged fake-input smoke contract.
 - `src/mgesture/input/dispatcher.py` owns shared typed-action dispatch and held-button tracking.
 - `tests/` contains unit, replay, integration, and fixture tests.
-- `mojo/` contains the optional stable-Mojo numeric extension and Mojo-native tests.
+- `mojo/` contains the canonical Mojo gesture implementation and Mojo-native tests. Its source applies to every stable release target; compiler/runtime availability is tracked separately.
 - `docs/` contains implementation, architecture, gesture, platform, privacy, troubleshooting, and benchmark documents.
 - `scripts/` contains explicit setup/build helpers; scripts must not silently download models or require root.
 - `release/targets.toml` is the canonical standalone target matrix.
@@ -138,7 +138,8 @@ Hardware validation uses `pixi run python -m mgesture doctor --json`; real webca
 ## Mojo compatibility rules
 
 - Pin stable Mojo `1.0.0` where the target Pixi platform provides it.
-- Native Mojo support is Linux and supported macOS environments; native Windows uses Python.
+- The canonical Mojo source is first-class for all six release targets. Native Mojo compiler/runtime availability is target-specific: current native source CI covers Linux x86_64, Linux ARM64, and Apple Silicon; Windows and Intel macOS use the Python runtime.
+- `mojo_source` means the maintained, parity-tested implementation is present and released; `native_mojo_engine` means a compiler-free native engine is bundled and has executed on the matching target. Never conflate these fields or set source availability false because a compiler is unavailable.
 - Follow current official syntax and Python binding limits; keep the binding small and below six PythonObject parameters.
 - Compile every meaningful Mojo change with `mojo build` and run Mojo tests.
 - Mojo owns meaningful persistent numeric state; it is not a cosmetic wrapper.
@@ -163,6 +164,8 @@ Hardware validation uses `pixi run python -m mgesture doctor --json`; real webca
 - README installation commands remain versionless and use `releases/latest/download`.
 - Installers verify `SHA256SUMS`, `release-manifest.json`, `release-manifest.tsv`, staged version output, and the headless fake-input self-test before atomic activation.
 - `release/targets.toml` is the single canonical target matrix; unsupported rows are explicit and not published.
+- Every stable target must declare `standalone = true`, `vision = true`, `mojo_source = true`, and `python_engine = true`. Native Mojo is enabled only after the official toolchain builds it and the packaged engine executes on the matching native runner.
+- Standalone bundles include the canonical Mojo source and its deterministic source hash; source files are not a second editable implementation.
 - Release bundles include the CPU reference runtime and pinned model where the target is publishable. GPU drivers remain external system dependencies; CPU fallback is always present.
 - Build and packaged smoke tests must pass before publication. Release artifacts are executed after packaging.
 - The release workflow may publish only an exact full-SHA `main` commit whose normal CI run succeeded.
