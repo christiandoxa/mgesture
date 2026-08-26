@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 from mgesture.engine.models import Button
@@ -14,14 +15,15 @@ class LinuxWaylandBackend:
 
     def __init__(self) -> None:
         try:
-            from evdev import UInput, ecodes
+            evdev = importlib.import_module("evdev")
         except ImportError as exc:
             raise RuntimeError(
                 "Wayland backend needs python-evdev; install Pixi Linux dependencies"
             ) from exc
         try:
+            ecodes = evdev.ecodes
             self._ecodes = ecodes
-            self._ui: Any = UInput(
+            self._ui: Any = evdev.UInput(
                 {
                     ecodes.EV_REL: [
                         ecodes.REL_X,

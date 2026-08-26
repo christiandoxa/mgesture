@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+from typing import Any, cast
 
 from mgesture.engine.models import Button
 
@@ -43,7 +44,7 @@ class WindowsMouseBackend:
     def __init__(self) -> None:
         if __import__("sys").platform != "win32":
             raise RuntimeError("Windows backend requires native Windows, not WSL")
-        self._user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        self._user32 = cast(Any, ctypes).windll.user32
         self._held: set[Button] = set()
 
     def get_screen_layout(self) -> ScreenLayout:
@@ -64,7 +65,7 @@ class WindowsMouseBackend:
     def _send(self, dx: int, dy: int, data: int, flags: int) -> None:
         item = _Input(self._INPUT_MOUSE, _MouseInput(dx, dy, data, flags, 0, None))
         if self._user32.SendInput(1, ctypes.byref(item), ctypes.sizeof(item)) != 1:
-            raise ctypes.WinError()  # type: ignore[attr-defined]
+            raise cast(Any, ctypes).WinError()
 
     def move_absolute(self, x: float, y: float) -> None:
         layout = self.get_screen_layout()

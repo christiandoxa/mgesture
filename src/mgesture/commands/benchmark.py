@@ -20,8 +20,11 @@ from mgesture.vision.model_manager import available_model
 
 def _usage() -> tuple[float, int]:
     if resource is not None:
-        usage = resource.getrusage(resource.RUSAGE_SELF)
-        return usage.ru_utime + usage.ru_stime, usage.ru_maxrss
+        getrusage = getattr(resource, "getrusage", None)
+        rusage_self = getattr(resource, "RUSAGE_SELF", None)
+        if callable(getrusage) and rusage_self is not None:
+            usage = getrusage(rusage_self)
+            return usage.ru_utime + usage.ru_stime, usage.ru_maxrss
     return 0.0, 0
 
 

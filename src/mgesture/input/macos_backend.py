@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import sys
 from typing import Any
 
@@ -15,10 +16,10 @@ class MacOSMouseBackend:
         if sys.platform != "darwin":
             raise RuntimeError("macOS backend requires macOS")
         try:
-            import Quartz  # type: ignore[import-not-found]
+            quartz = importlib.import_module("Quartz")
         except ImportError as exc:
             raise RuntimeError("macOS backend needs pyobjc-framework-Quartz") from exc
-        self._quartz: Any = Quartz
+        self._quartz: Any = quartz
         self._held: set[Button] = set()
 
     def get_screen_layout(self) -> ScreenLayout:
