@@ -129,7 +129,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $binary self-test --headless --fake-input
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $doctor = & $binary doctor --runtime --json
+          $doctor = & $binary doctor --runtime --json | Out-String
           if ($LASTEXITCODE -ne 0 -or ($doctor -notmatch '"compiler_required": false')) { throw "standalone runtime diagnostics failed" }
       - name: Upload standalone archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
