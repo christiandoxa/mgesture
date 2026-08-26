@@ -19,7 +19,7 @@ def main() -> None:
         raise ValueError("CI target runners must be unique")
     if {row["mojo_ci_mode"] for row in rows} != {"native", "source-contract"}:
         raise ValueError("CI matrix must contain native and source-contract Mojo modes")
-    print(json.dumps(rows, separators=(",", ":")))
+    print(json.dumps({"include": rows}, separators=(",", ":")))
 
 
 if __name__ == "__main__":
