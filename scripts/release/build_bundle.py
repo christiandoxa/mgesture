@@ -42,16 +42,19 @@ def _commit(value: str | None) -> str:
 
 
 def _mojo_compiler_version(required: bool) -> str:
-    command = shutil.which("mojo")
-    if command:
-        result = subprocess.run([command, "--version"], capture_output=True, text=True, check=True)
-        return (result.stdout or result.stderr).strip()
     metadata_path = ROOT / "mojo-objects" / "mojo-build-metadata.json"
     if metadata_path.is_file():
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         version = metadata.get("compiler_version") if isinstance(metadata, dict) else None
         if isinstance(version, str) and version:
             return version
+    command = shutil.which("mojo")
+    if command:
+        result = subprocess.run([command, "--version"], capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            version = (result.stdout or result.stderr).strip()
+            if version:
+                return version
     if required:
         raise RuntimeError("native Mojo compiler provenance metadata is unavailable")
     return "not-used"

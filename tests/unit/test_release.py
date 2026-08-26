@@ -112,6 +112,27 @@ def test_windows_tool_lookup_matches_target_architecture(monkeypatch: pytest.Mon
     assert build_mojo_library.find_windows_tool("cl.exe", "x86_64").endswith(r"\x64\cl.exe")
 
 
+def test_bundle_uses_cross_compile_provenance_when_mojo_command_collides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import build_bundle
+
+    metadata = tmp_path / "mojo-objects"
+    metadata.mkdir()
+    (metadata / "mojo-build-metadata.json").write_text(
+        '{"compiler_version": "Mojo 1.0.0 (cross-object)"}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(build_bundle, "ROOT", tmp_path)
+    monkeypatch.setattr(build_bundle.shutil, "which", lambda name: r"C:\Strawberry\mojo.BAT")
+    monkeypatch.setattr(
+        build_bundle.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=2, stdout="", stderr=""),
+    )
+
+    assert build_bundle._mojo_compiler_version(required=True) == "Mojo 1.0.0 (cross-object)"
+
+
 def test_windows_arm_link_does_not_add_x86_shim(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
