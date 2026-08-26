@@ -107,6 +107,7 @@ jobs:
         shell: pwsh
         run: |
           echo "CMAKE_ARGS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
+          echo "SKBUILD_CONFIGURE_OPTIONS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
           echo "PIXI_CACHE_DIR=C:\\p" >> $env:GITHUB_ENV
       - name: Install dependencies and model
         run: |
