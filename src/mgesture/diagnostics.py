@@ -13,6 +13,7 @@ from pathlib import Path
 from .compute import capabilities_dict, detect_hardware, select_compute_plan
 from .config import AppConfig, config_path, validate
 from .engine import EngineConfig, EngineUnavailableError, create_engine
+from .engine.mojo_engine import NativeMojoGestureEngine, native_library_name
 from .input import create_backend
 from .release import runtime_metadata
 from .self_test import run_self_test
@@ -73,18 +74,23 @@ def _engine_capabilities(
         nested_mojo.get("native_engine_loaded") is True
     )
     if probe and requested != "python":
+        native_available = False
+        native_loaded = False
         if os.environ.get("MGESTURE_ENGINE", "auto").lower() != "python":
             try:
                 engine = create_engine("mojo", EngineConfig(), armed=False)
             except EngineUnavailableError:
                 pass
             else:
-                native_available = engine.name == "mojo"
+                native_available = isinstance(engine, NativeMojoGestureEngine)
                 native_loaded = native_available
-                close = getattr(engine, "close", None)
-                if callable(close):
-                    close()
+                if native_available:
+                    close = getattr(engine, "close", None)
+                    if callable(close):
+                        close()
     python_available = metadata.get("python_engine_available", True) is True
+    if requested == "python":
+        native_loaded = False
     active = (
         "python"
         if requested == "python" or (requested == "auto" and not native_loaded)
@@ -98,6 +104,17 @@ def _engine_capabilities(
         "native_mojo_engine_loaded": native_loaded,
         "python_engine_available": python_available,
         "active_engine": active,
+        "mojo_abi_version": (
+            metadata.get("mojo_abi_version")
+            or nested_mojo.get("abi_version")
+            or (1 if native_loaded else None)
+        ),
+        "mojo_library": (
+            metadata.get("mojo_library")
+            or nested_mojo.get("library")
+            or (native_library_name() if native_loaded else None)
+        ),
+        "mojo_build_target": nested_mojo.get("build_target"),
     }
 
 

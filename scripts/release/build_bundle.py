@@ -155,9 +155,9 @@ def build(
             )
         source_dir = share / "mojo"
         source_dir.mkdir(parents=True)
-        for source_path in mojo_source_paths():
+        for source_path in mojo_source_paths(ROOT / "mojo"):
             shutil.copy2(source_path, source_dir / source_path.name)
-        source_metadata = mojo_source_metadata()
+        source_metadata = mojo_source_metadata(ROOT / "mojo")
         mojo_library_sha256 = _sha256(mojo_library) if native_mojo else None
         mojo_compiler_version = _mojo_compiler_version(native_mojo)
         fixture = share / "fixtures" / "basic.json"

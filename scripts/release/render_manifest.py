@@ -89,7 +89,7 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
     if version != runtime_version():
         raise ValueError(f"manifest version {version} does not match runtime {runtime_version()}")
     targets = publishable_targets()
-    source_metadata = mojo_source_metadata()
+    source_metadata = mojo_source_metadata(ROOT / "mojo")
     if not source_metadata["available"]:
         raise RuntimeError("canonical Mojo production source is missing")
     rows: dict[str, dict[str, object]] = {}

@@ -58,7 +58,7 @@ def verify(directory: Path, version: str | None = None) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("commit", ""))):
         raise ValueError("release manifest commit must be a full SHA")
     expected_targets = publishable_targets()
-    expected_source = mojo_source_metadata()
+    expected_source = mojo_source_metadata(ROOT / "mojo")
     sbom_path = directory / "mgesture-sbom.spdx.json"
     if not sbom_path.is_file():
         raise ValueError("release is missing mgesture-sbom.spdx.json")

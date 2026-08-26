@@ -5,6 +5,7 @@ import os
 from typing import Any
 
 from .engine import Button, EngineConfig, create_engine
+from .engine.mojo_engine import NativeMojoGestureEngine
 from .engine.synthetic import synthetic_frames
 from .input import FakeMouseBackend
 from .release import runtime_metadata
@@ -17,14 +18,16 @@ def run_self_test(require_mojo: bool = False, engine_request: str = "auto") -> d
     checks["mojo_source"] = (
         "passed" if metadata.get("mojo_source_available") is True else "not-available"
     )
-    native_mojo = metadata.get("native_mojo_engine_available") is True
-    if not native_mojo and metadata.get("standalone") is not True:
-        try:
-            probe = create_engine("mojo", EngineConfig(), armed=False)
-        except Exception:
-            pass
-        else:
-            native_mojo = probe.name == "mojo"
+    native_mojo = False
+    try:
+        probe = create_engine("mojo", EngineConfig(), armed=False)
+    except Exception:
+        pass
+    else:
+        native_mojo = isinstance(probe, NativeMojoGestureEngine)
+        close = getattr(probe, "close", None)
+        if callable(close):
+            close()
     checks["mojo_native_engine"] = "passed" if native_mojo else "not-available"
     checks["python_engine"] = (
         "passed" if metadata.get("python_engine_available", True) is True else "not-available"

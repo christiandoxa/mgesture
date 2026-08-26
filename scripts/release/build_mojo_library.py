@@ -117,7 +117,7 @@ def link_library(target_name: str, object_path: Path, output: Path) -> Path:
         metadata = json.loads(provenance.read_text(encoding="utf-8"))
         if (
             not isinstance(metadata, dict)
-            or metadata.get("source_sha256") != mojo_source_metadata()["sha256"]
+            or metadata.get("source_sha256") != mojo_source_metadata(ROOT / "mojo")["sha256"]
             or target_name not in metadata.get("targets", [])
         ):
             raise RuntimeError(f"cross-target Mojo object provenance is invalid: {provenance}")

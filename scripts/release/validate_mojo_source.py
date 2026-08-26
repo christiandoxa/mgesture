@@ -26,7 +26,7 @@ def digest(path: Path) -> str:
 
 
 def validate_source() -> None:
-    source = mojo_source_metadata()
+    source = mojo_source_metadata(ROOT / "mojo")
     required_source = {"mgesture_core.mojo", "mgesture_python.mojo"}
     if not source["available"] or not required_source <= set(source["files"]):
         raise ValueError("canonical Mojo production source is missing")

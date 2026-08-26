@@ -32,7 +32,7 @@ def build_objects(output_dir: Path) -> list[Path]:
         json.dumps(
             {
                 "compiler_version": (result.stdout or result.stderr).strip(),
-                "source_sha256": mojo_source_metadata()["sha256"],
+                "source_sha256": mojo_source_metadata(ROOT / "mojo")["sha256"],
                 "targets": [path.stem for path in objects],
             },
             indent=2,
