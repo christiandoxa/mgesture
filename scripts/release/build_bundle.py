@@ -18,8 +18,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "release"))
 
 from release_targets import target  # noqa: E402
+from validate_mojo_abi import validate as validate_mojo_abi  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
+from mgesture.engine.mojo_engine import native_library_name  # noqa: E402
 from mgesture.release import mojo_source_metadata, mojo_source_paths  # noqa: E402
 from mgesture.vision.model_manager import available_model  # noqa: E402
 
@@ -39,12 +41,37 @@ def _commit(value: str | None) -> str:
     return result.stdout.strip() if result.returncode == 0 else "source-tree"
 
 
-def build(target_name: str, output: Path, model: Path | None, version: str, commit: str) -> Path:
+def _mojo_compiler_version(required: bool) -> str:
+    command = shutil.which("mojo")
+    if command:
+        result = subprocess.run([command, "--version"], capture_output=True, text=True, check=True)
+        return (result.stdout or result.stderr).strip()
+    metadata_path = ROOT / "mojo-objects" / "mojo-build-metadata.json"
+    if metadata_path.is_file():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        version = metadata.get("compiler_version") if isinstance(metadata, dict) else None
+        if isinstance(version, str) and version:
+            return version
+    if required:
+        raise RuntimeError("native Mojo compiler provenance metadata is unavailable")
+    return "not-used"
+
+
+def build(
+    target_name: str,
+    output: Path,
+    model: Path | None,
+    version: str,
+    commit: str,
+    mojo_library: Path | None = None,
+) -> Path:
     if version != _version():
         raise ValueError(f"bundle version {version} does not match runtime version {_version()}")
     release_target = target(target_name)
     if not release_target.publishable:
         raise RuntimeError(f"target {target_name} is not publishable: {release_target.status}")
+    if release_target.native_mojo_engine and mojo_library is None:
+        raise RuntimeError("a verified native Mojo library is required for this target")
     model = model or available_model()
     if model is None:
         raise RuntimeError(
@@ -115,11 +142,24 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
             encoding="utf-8",
         )
         shutil.copy2(ROOT / "release/targets.toml", share / "targets.toml")
+        native_mojo = mojo_library is not None
+        if native_mojo:
+            if not mojo_library.is_file():
+                raise FileNotFoundError(mojo_library)
+            validate_mojo_abi(target_name, mojo_library)
+            mojo_runtime = bundle / "runtime" / "mojo"
+            mojo_runtime.mkdir(parents=True)
+            shutil.copy2(
+                mojo_library,
+                mojo_runtime / native_library_name(release_target.os),
+            )
         source_dir = share / "mojo"
         source_dir.mkdir(parents=True)
         for source_path in mojo_source_paths():
             shutil.copy2(source_path, source_dir / source_path.name)
         source_metadata = mojo_source_metadata()
+        mojo_library_sha256 = _sha256(mojo_library) if native_mojo else None
+        mojo_compiler_version = _mojo_compiler_version(native_mojo)
         fixture = share / "fixtures" / "basic.json"
         fixture.parent.mkdir(parents=True)
         shutil.copy2(ROOT / "tests/fixtures/basic.json", fixture)
@@ -144,11 +184,11 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
             "mojo_source_available": release_target.mojo_source,
             "mojo_source_sha256": str(source_metadata["sha256"]),
             "mojo_source_files": source_metadata["files"],
-            "native_mojo_engine_available": release_target.native_mojo_engine,
+            "native_mojo_engine_available": native_mojo,
             "native_mojo_engine_loaded": False,
             "python_engine_available": release_target.python_engine,
-            "runtime_default": release_target.runtime_default,
-            "implementation": release_target.runtime_default,
+            "runtime_default": "mojo" if native_mojo else release_target.runtime_default,
+            "implementation": "mojo" if native_mojo else release_target.runtime_default,
             "compiler_required": False,
             "python_runtime_bundled": True,
             "model_sha256": _sha256(model),
@@ -162,18 +202,27 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
             "vision_backend": "mediapipe",
             "minimum_os": release_target.minimum_os,
             "package_format": release_target.format,
-            "mojo_version": "not bundled",
+            "mojo_version": "mojo-abi-1" if native_mojo else "not bundled",
+            "mojo_compiler_version": mojo_compiler_version,
+            "mojo_abi_version": 1 if native_mojo else None,
+            "mojo_library": native_library_name(release_target.os) if native_mojo else None,
+            "mojo_library_sha256": mojo_library_sha256,
             "mojo": {
                 "source_available": release_target.mojo_source,
                 "source_sha256": str(source_metadata["sha256"]),
                 "source_files": source_metadata["files"],
-                "native_engine_available": release_target.native_mojo_engine,
+                "native_engine_available": native_mojo,
                 "native_engine_loaded": False,
+                "abi_version": 1 if native_mojo else None,
+                "library": native_library_name(release_target.os) if native_mojo else None,
+                "library_sha256": mojo_library_sha256,
+                "build_target": target_name if native_mojo else None,
+                "compiler_version": mojo_compiler_version,
             },
             "vision": {"available": release_target.vision, "implementation": "mediapipe"},
             "python_engine": {"available": release_target.python_engine},
             "gesture_engine": {
-                "implementation": release_target.runtime_default,
+                "implementation": "mojo" if native_mojo else release_target.runtime_default,
                 "compiler_required": False,
                 "self_test": "pending-runtime-smoke",
             },
@@ -183,25 +232,39 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
         )
         binary = app_bin / ("mgesture.exe" if sys.platform == "win32" else "mgesture")
         subprocess.run(
-            [str(binary), "self-test", "--headless", "--fake-input"],
+            [
+                str(binary),
+                "self-test",
+                "--headless",
+                "--fake-input",
+                "--engine",
+                "mojo" if native_mojo else "auto",
+            ],
             cwd=bundle,
             env={**os.environ, "MGESTURE_BUNDLE_ROOT": str(bundle)},
             check=True,
         )
         metadata["gesture_engine"]["self_test"] = "passed"
+        metadata["native_mojo_engine_loaded"] = native_mojo
+        metadata["mojo"]["native_engine_loaded"] = native_mojo
         (share / "release-metadata.json").write_text(
             json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
         )
         shutil.copy2(ROOT / "install.sh", bundle / "install.sh")
         shutil.copy2(ROOT / "install.ps1", bundle / "install.ps1")
-        if output.suffix == ".zip":
-            with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-                for path in bundle.rglob("*"):
-                    if path.is_file():
-                        archive.write(path, Path("mgesture") / path.relative_to(bundle))
-        else:
-            with tarfile.open(output, "w:gz") as archive:
-                archive.add(bundle, arcname="mgesture")
+        archive_output = output.with_name(f".{output.name}.{os.getpid()}.tmp")
+        try:
+            if output.suffix == ".zip":
+                with zipfile.ZipFile(archive_output, "w", zipfile.ZIP_DEFLATED) as archive:
+                    for path in bundle.rglob("*"):
+                        if path.is_file():
+                            archive.write(path, Path("mgesture") / path.relative_to(bundle))
+            else:
+                with tarfile.open(archive_output, "w:gz") as archive:
+                    archive.add(bundle, arcname="mgesture")
+            os.replace(archive_output, output)
+        finally:
+            archive_output.unlink(missing_ok=True)
     return output
 
 
@@ -222,8 +285,16 @@ def main() -> None:
     parser.add_argument("--model", type=Path)
     parser.add_argument("--version", default=_version())
     parser.add_argument("--commit")
+    parser.add_argument("--mojo-library", type=Path)
     args = parser.parse_args()
-    build(args.target, args.output, args.model, args.version, _commit(args.commit))
+    build(
+        args.target,
+        args.output,
+        args.model,
+        args.version,
+        _commit(args.commit),
+        args.mojo_library,
+    )
     print(args.output)
 
 

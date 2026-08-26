@@ -90,7 +90,7 @@ version_line=$(MGESTURE_BUNDLE_ROOT="$root" "$binary" --version)
 case "$version_line" in mgesture\ *) ;; *) fail 'staged executable did not report mgesture';; esac
 installed_version=${version_line#'mgesture '}
 [ "$manifest_version" = "$installed_version" ] || fail 'binary version differs from manifest'
-MGESTURE_BUNDLE_ROOT="$root" "$binary" self-test --headless --fake-input >/dev/null || fail 'staged self-test failed'
+MGESTURE_BUNDLE_ROOT="$root" "$binary" self-test --headless --fake-input --engine mojo >/dev/null || fail 'staged native Mojo self-test failed'
 MGESTURE_BUNDLE_ROOT="$root" "$binary" doctor --runtime --json >/dev/null || fail 'staged runtime diagnostics failed'
 
 mkdir -p "$app_root/releases" "$bin_dir"

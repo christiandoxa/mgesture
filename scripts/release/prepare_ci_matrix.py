@@ -17,8 +17,10 @@ def main() -> None:
         raise ValueError("CI requires exactly the six canonical release targets")
     if len({row["runner"] for row in rows}) != 6:
         raise ValueError("CI target runners must be unique")
-    if {row["mojo_ci_mode"] for row in rows} != {"native", "source-contract"}:
-        raise ValueError("CI matrix must contain native and source-contract Mojo modes")
+    if {row["mojo_ci_mode"] for row in rows} != {"native"}:
+        raise ValueError("all six Mojo CI jobs must validate a native engine")
+    if {row["mojo_build_mode"] for row in rows} != {"native", "cross-object"}:
+        raise ValueError("CI matrix must contain native and cross-object Mojo build modes")
     print(json.dumps({"include": rows}, separators=(",", ":")))
 
 

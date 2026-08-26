@@ -120,6 +120,10 @@ def _macho_architectures(data: bytes) -> set[str]:
 
 def binary_architectures(path: Path) -> set[str] | None:
     data = _read_header(path)
+    if len(data) >= 2:
+        machine = struct.unpack_from("<H", data, 0)[0]
+        if machine in _PE_MACHINES:
+            return {_PE_MACHINES[machine]}
     if data.startswith(b"\x7fELF"):
         if len(data) < 20 or data[4] != 2:
             raise ValueError("ELF binary is not 64-bit")

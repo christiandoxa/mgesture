@@ -29,6 +29,7 @@ jobs:
     outputs:
       version: ${{ steps.target.outputs.version }}
       target_sha: ${{ steps.target.outputs.target_sha }}
+      targets: ${{ steps.matrix.outputs.targets }}
     steps:
       - name: Check out exact commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -63,33 +64,52 @@ jobs:
           done
           echo 'timed out waiting for exact-SHA CI' >&2
           exit 1
+      - name: Generate canonical release matrix
+        id: matrix
+        run: |
+          targets="$(python3 scripts/release/prepare_ci_matrix.py)"
+          echo "targets=${targets}" >> "$GITHUB_OUTPUT"
+
+  build_mojo_objects:
+    name: Build cross-target Mojo objects
+    needs: verify-ci
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.verify-ci.outputs.target_sha }}
+          persist-credentials: false
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: v0.77.1
+          run-install: false
+          cache: false
+      - name: Install environment
+        run: pixi install --locked
+      - name: Inspect Mojo compiler
+        run: |
+          pixi run mojo --version
+          pixi run mojo build --print-supported-targets
+      - name: Emit cross-target Mojo objects
+        run: pixi run python scripts/release/build_mojo_objects.py --output-dir mojo-objects
+      - name: Validate cross-target object set
+        run: test "$(find mojo-objects -maxdepth 1 -type f -name '*.o' | wc -l)" = 3
+      - name: Upload cross-target Mojo objects
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mojo-cross-objects
+          path: mojo-objects
+          if-no-files-found: error
 
   build:
     name: Build ${{ matrix.target }}
-    needs: verify-ci
+    needs: [verify-ci, build_mojo_objects]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-24.04
-            asset: mgesture-x86_64-unknown-linux-gnu.tar.gz
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
-            asset: mgesture-aarch64-unknown-linux-gnu.tar.gz
-          - target: x86_64-apple-darwin
-            runner: macos-15-intel
-            asset: mgesture-x86_64-apple-darwin.tar.gz
-          - target: aarch64-apple-darwin
-            runner: macos-14
-            asset: mgesture-aarch64-apple-darwin.tar.gz
-          - target: x86_64-pc-windows-msvc
-            runner: windows-2025
-            asset: mgesture-x86_64-pc-windows-msvc.zip
-          - target: aarch64-pc-windows-msvc
-            runner: windows-11-arm
-            asset: mgesture-aarch64-pc-windows-msvc.zip
+      matrix: ${{ fromJSON(needs.verify-ci.outputs.targets) }}
     steps:
       - name: Check out exact commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -113,15 +133,47 @@ jobs:
         run: |
           pixi install --locked
           pixi run python -m mgesture model install
+      - name: Download cross-target Mojo object
+        if: matrix.mojo_build_mode == 'cross-object'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: mojo-cross-objects
+          path: mojo-objects
       - name: Validate native runner architecture
         run: pixi run python scripts/release/validate_architecture.py runner --target ${{ matrix.target }}
       - name: Validate canonical target row
         run: >-
           pixi run python -c
           "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
-          row = target('${{ matrix.target }}'); assert row.publishable and row.runner == '${{ matrix.runner }}' and row.asset == '${{ matrix.asset }}'"
-      - name: Build standalone archive
-        run: pixi run python scripts/release/build_bundle.py --target ${{ matrix.target }} --output dist/${{ matrix.asset }} --version ${{ needs.verify-ci.outputs.version }} --commit ${{ needs.verify-ci.outputs.target_sha }}
+          row = target('${{ matrix.target }}'); assert row.publishable and row.runner == '${{ matrix.runner }}' and row.asset == '${{ matrix.asset }}' and row.mojo_ci_mode == 'native' and row.mojo_build_mode == '${{ matrix.mojo_build_mode }}'"
+      - name: Build native Mojo library (Linux)
+        if: matrix.mojo_build_mode == 'native' && runner.os == 'Linux'
+        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --output build/libmgesture_mojo.so
+      - name: Build native Mojo library (macOS)
+        if: matrix.mojo_build_mode == 'native' && runner.os == 'macOS'
+        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --output build/libmgesture_mojo.dylib
+      - name: Link cross-target Mojo library (macOS)
+        if: matrix.mojo_build_mode == 'cross-object' && runner.os == 'macOS'
+        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --object mojo-objects/${{ matrix.target }}.o --output build/libmgesture_mojo.dylib
+      - name: Link cross-target Mojo library (Windows)
+        if: matrix.mojo_build_mode == 'cross-object' && runner.os == 'Windows'
+        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --object mojo-objects/${{ matrix.target }}.o --output build/mgesture_mojo.dll
+      - name: Validate native Mojo ABI (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          library=build/libmgesture_mojo.so
+          if [ "$RUNNER_OS" = macOS ]; then library=build/libmgesture_mojo.dylib; fi
+          pixi run python scripts/release/validate_mojo_abi.py --target "${{ matrix.target }}" --library "$library"
+      - name: Validate native Mojo ABI (Windows)
+        if: runner.os == 'Windows'
+        run: pixi run python scripts/release/validate_mojo_abi.py --target ${{ matrix.target }} --library build/mgesture_mojo.dll
+      - name: Build standalone archive (Unix)
+        if: runner.os != 'Windows'
+        run: pixi run python scripts/release/build_bundle.py --target ${{ matrix.target }} --output dist/${{ matrix.asset }} --version ${{ needs.verify-ci.outputs.version }} --commit ${{ needs.verify-ci.outputs.target_sha }} --mojo-library build/libmgesture_mojo.${{ runner.os == 'macOS' && 'dylib' || 'so' }}
+      - name: Build standalone archive (Windows)
+        if: runner.os == 'Windows'
+        run: pixi run python scripts/release/build_bundle.py --target ${{ matrix.target }} --output dist/${{ matrix.asset }} --version ${{ needs.verify-ci.outputs.version }} --commit ${{ needs.verify-ci.outputs.target_sha }} --mojo-library build/mgesture_mojo.dll
       - name: Extract and execute clean-machine smoke (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -133,9 +185,11 @@ jobs:
           pixi run python scripts/release/validate_architecture.py bundle --target "${{ matrix.target }}" --root "$RUNNER_TEMP/mgesture-clean/mgesture"
           binary="$RUNNER_TEMP/mgesture-clean/mgesture/bin/mgesture"
           env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" --version
-          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" self-test --headless --fake-input
-          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" doctor --runtime --json | grep -F '"compiler_required": false'
-          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" replay --fixture "$RUNNER_TEMP/mgesture-clean/mgesture/share/mgesture/fixtures/basic.json" >/dev/null
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" self-test --headless --fake-input --engine mojo
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" doctor --runtime --json | tee "$RUNNER_TEMP/mgesture-doctor.json"
+          grep -F '"compiler_required": false' "$RUNNER_TEMP/mgesture-doctor.json"
+          grep -F '"active_engine": "mojo"' "$RUNNER_TEMP/mgesture-doctor.json"
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" replay --fixture "$RUNNER_TEMP/mgesture-clean/mgesture/share/mgesture/fixtures/basic.json" --engine mojo >/dev/null
       - name: Extract and execute clean-machine smoke (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -151,11 +205,11 @@ jobs:
           $env:MGESTURE_BUNDLE_ROOT = $bundle
           & $binary --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $binary self-test --headless --fake-input
+          & $binary self-test --headless --fake-input --engine mojo
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $doctor = & $binary doctor --runtime --json | Out-String
-          if ($LASTEXITCODE -ne 0 -or ($doctor -notmatch '"compiler_required": false')) { throw "standalone runtime diagnostics failed" }
-          & $binary replay --fixture (Join-Path $bundle "share\mgesture\fixtures\basic.json") | Out-Null
+          if ($LASTEXITCODE -ne 0 -or ($doctor -notmatch '"compiler_required": false') -or ($doctor -notmatch '"active_engine": "mojo"')) { throw "standalone runtime diagnostics failed" }
+          & $binary replay --fixture (Join-Path $bundle "share\mgesture\fixtures\basic.json") --engine mojo | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload standalone archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -200,7 +254,7 @@ jobs:
           set -euo pipefail
           cp install.sh install.ps1 release-assets/
           pixi run python scripts/release/render_manifest.py --version "$VERSION" --commit "$COMMIT" --assets release-assets --output release-assets
-          pixi run python scripts/release/sbom.py --version "$VERSION" --output release-assets/mgesture-sbom.spdx.json
+          pixi run python scripts/release/sbom.py --version "$VERSION" --assets release-assets --output release-assets/mgesture-sbom.spdx.json
           pixi run python scripts/release/generate_checksums.py release-assets
           pixi run python scripts/release/verify_release.py release-assets --version "$VERSION"
       - name: Attest final archive and SBOM

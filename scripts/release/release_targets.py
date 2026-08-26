@@ -29,6 +29,7 @@ class Target:
     vision: bool
     mojo_source: bool
     mojo_ci_mode: str
+    mojo_build_mode: str
     python_engine: bool
     native_mojo_engine: bool
     runtime_default: str
@@ -75,7 +76,9 @@ def ci_matrix(path: Path | None = None) -> list[dict[str, str]]:
         {
             "target": value.name,
             "runner": value.runner,
+            "asset": value.asset,
             "mojo_ci_mode": value.mojo_ci_mode,
+            "mojo_build_mode": value.mojo_build_mode,
         }
         for value in publishable_targets(path).values()
     ]

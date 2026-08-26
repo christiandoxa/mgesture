@@ -72,7 +72,7 @@ def _engine_capabilities(
     native_loaded = metadata.get("native_mojo_engine_loaded") is True or (
         nested_mojo.get("native_engine_loaded") is True
     )
-    if probe and metadata.get("standalone") is not True:
+    if probe and requested != "python":
         if os.environ.get("MGESTURE_ENGINE", "auto").lower() != "python":
             try:
                 engine = create_engine("mojo", EngineConfig(), armed=False)
@@ -81,6 +81,9 @@ def _engine_capabilities(
             else:
                 native_available = engine.name == "mojo"
                 native_loaded = native_available
+                close = getattr(engine, "close", None)
+                if callable(close):
+                    close()
     python_available = metadata.get("python_engine_available", True) is True
     active = (
         "python"
@@ -144,9 +147,7 @@ def collect_checks(
     hardware = detect_hardware()
     engine_request = os.environ.get("MGESTURE_ENGINE", config.input.engine)
     metadata = runtime_metadata()
-    engine_status = _engine_capabilities(
-        metadata, engine_request, probe=metadata.get("standalone") is not True
-    )
+    engine_status = _engine_capabilities(metadata, engine_request, probe=True)
     compute_request = os.environ.get("MGESTURE_COMPUTE", config.compute.mode)
     try:
         compute_plan = select_compute_plan(compute_request, hardware, config.input.engine)
@@ -348,7 +349,7 @@ def report_json(config: AppConfig, checks: list[Check], runtime: bool = False) -
     engine_status = _engine_capabilities(
         metadata,
         engine_request,
-        probe=metadata.get("standalone") is not True,
+        probe=True,
     )
     result: dict[str, object] = {
         "checks": [

@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "release"))
 from release_targets import publishable_targets  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
+from mgesture.engine.mojo_engine import native_library_name  # noqa: E402
 from mgesture.release import mojo_source_metadata  # noqa: E402
 from mgesture.vision.model_manager import MODEL_SHA256  # noqa: E402
 
@@ -64,6 +65,26 @@ def archive_metadata(path: Path, archive_format: str) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
+def archive_file_digest(path: Path, archive_format: str, member_suffix: str) -> str:
+    digest_value = hashlib.sha256()
+    if archive_format == "zip":
+        with zipfile.ZipFile(path) as archive:
+            member = next(name for name in archive.namelist() if name.endswith(member_suffix))
+            handle = archive.open(member)
+    else:
+        with tarfile.open(path, "r:gz") as archive:
+            member = next(
+                item for item in archive.getmembers() if item.name.endswith(member_suffix)
+            )
+            handle = archive.extractfile(member)
+            if handle is None:
+                raise RuntimeError(f"archive member cannot be read: {member_suffix}")
+    with handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest_value.update(chunk)
+    return digest_value.hexdigest()
+
+
 def render(version: str, commit: str, assets: Path, output: Path) -> None:
     if version != runtime_version():
         raise ValueError(f"manifest version {version} does not match runtime {runtime_version()}")
@@ -84,6 +105,26 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
         native_mojo_engine = bool(
             metadata.get("native_mojo_engine_available", target.native_mojo_engine)
         )
+        native_mojo_engine_loaded = bool(
+            metadata.get("native_mojo_engine_loaded", native_mojo_engine)
+        )
+        mojo_abi_version = metadata.get("mojo_abi_version", 1 if native_mojo_engine else None)
+        mojo_library = metadata.get(
+            "mojo_library", native_library_name(target.os) if native_mojo_engine else None
+        )
+        if native_mojo_engine:
+            mojo_library_sha256 = archive_file_digest(
+                asset_path,
+                target.format,
+                f"runtime/mojo/{mojo_library}",
+            )
+            declared_library_sha256 = metadata.get("mojo_library_sha256")
+            if declared_library_sha256 not in (None, mojo_library_sha256):
+                raise RuntimeError(f"native Mojo library checksum mismatch: {target.asset}")
+        else:
+            mojo_library_sha256 = None
+        mojo_build_target = str(metadata.get("target", name))
+        mojo_compiler_version = str(metadata.get("mojo_compiler_version", "not-recorded"))
         rows[name] = {
             "target": name,
             "asset": target.asset,
@@ -98,6 +139,11 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
             "mojo_source_sha256": mojo_source_sha256,
             "mojo_source_files": mojo_source_files,
             "native_mojo_engine": native_mojo_engine,
+            "native_mojo_engine_loaded": native_mojo_engine_loaded,
+            "mojo_abi_version": mojo_abi_version,
+            "mojo_library": mojo_library,
+            "mojo_library_sha256": mojo_library_sha256,
+            "mojo_compiler_version": mojo_compiler_version,
             "python_engine_available": bool(
                 metadata.get("python_engine_available", target.python_engine)
             ),
@@ -107,6 +153,12 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
                 "source_sha256": mojo_source_sha256,
                 "source_files": mojo_source_files,
                 "native_engine_available": native_mojo_engine,
+                "native_engine_loaded": native_mojo_engine_loaded,
+                "abi_version": mojo_abi_version,
+                "library": mojo_library,
+                "library_sha256": mojo_library_sha256,
+                "build_target": mojo_build_target,
+                "compiler_version": mojo_compiler_version,
             },
             "vision": {"available": target.vision, "implementation": vision_backend},
             "python_engine": {"available": target.python_engine},

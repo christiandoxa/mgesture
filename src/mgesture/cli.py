@@ -24,6 +24,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="mgesture", description="Safe local webcam hand-gesture mouse control"
     )
     parser.add_argument("--version", action="version", version=f"mgesture {__version__}")
+    parser.add_argument("--engine", dest="global_engine", choices=("auto", "mojo", "python"))
     subparsers = parser.add_subparsers(dest="command")
 
     run = subparsers.add_parser("run", help="run webcam gesture control; starts paused")
@@ -71,6 +72,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     self_test.add_argument("--headless", action="store_true")
     self_test.add_argument("--fake-input", action="store_true")
+    self_test.add_argument("--engine", choices=("auto", "mojo", "python"))
     update = subparsers.add_parser("update", help="check for or install a newer release")
     update.add_argument("--check", action="store_true")
 
@@ -121,17 +123,19 @@ def main(argv: list[str] | None = None) -> None:
         print_benchmark(result)
         return
     if args.command == "self-test":
-        result = run_self_test()
+        engine_request = args.engine or args.global_engine or "auto"
+        result = run_self_test(require_mojo=engine_request == "mojo", engine_request=engine_request)
         print(json.dumps(result, indent=2))
         raise SystemExit(0 if result["passed"] else 1)
     if args.command == "update":
         raise SystemExit(run_update(args.check))
     if args.command == "run":
+        engine = args.engine or args.global_engine
         config = load_config(args.config)
         config = with_overrides(
             config,
             index=args.camera,
-            engine=args.engine,
+            engine=engine,
             backend=args.backend,
             preview=args.preview,
             armed=args.armed or None,
@@ -144,7 +148,7 @@ def main(argv: list[str] | None = None) -> None:
         try:
             armed_override = True if args.armed else None
             raise SystemExit(
-                Application(config, args.engine, args.backend, args.preview, armed_override).run()
+                Application(config, engine, args.backend, args.preview, armed_override).run()
             )
         except KeyboardInterrupt:
             logging.getLogger(__name__).info("stopped")

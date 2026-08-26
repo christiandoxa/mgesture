@@ -11,7 +11,7 @@ from .release import runtime_metadata
 from .vision.model_manager import available_model
 
 
-def run_self_test(require_mojo: bool = False) -> dict[str, Any]:
+def run_self_test(require_mojo: bool = False, engine_request: str = "auto") -> dict[str, Any]:
     checks: dict[str, str] = {}
     metadata = runtime_metadata()
     checks["mojo_source"] = (
@@ -40,13 +40,14 @@ def run_self_test(require_mojo: bool = False) -> dict[str, Any]:
     model = available_model()
     checks["model"] = "passed" if model is not None else "not-bundled-source"
     backend = FakeMouseBackend()
+    selected_engine = "mojo" if require_mojo else engine_request
     try:
         engine = create_engine(
-            "mojo" if require_mojo else "python",
+            selected_engine,
             EngineConfig(reacquisition_ms=0, activation_gesture=False),
             armed=True,
         )
-        if require_mojo and engine.name != "mojo":
+        if selected_engine == "mojo" and engine.name != "mojo":
             raise RuntimeError("native Mojo engine was not selected")
     except Exception as exc:
         checks["gesture_engine"] = f"failed: {exc}"
@@ -74,7 +75,7 @@ def run_self_test(require_mojo: bool = False) -> dict[str, Any]:
         for name, value in checks.items()
         if value != "passed"
         and not (name == "model" and not os.environ.get("MGESTURE_BUNDLE_ROOT"))
-        and not (name == "mojo_native_engine" and not require_mojo)
+        and not (name == "mojo_native_engine" and selected_engine != "mojo")
     }
     return {
         "passed": not failed,

@@ -1,39 +1,89 @@
 from std.math import max, min, sqrt
-from std.os import abort
-from std.python import Python, PythonObject
-from std.python.bindings import PythonModuleBuilder
+from std.memory import Pointer
+from std.sys import align_of, size_of
+
+
+comptime ACTION_NONE = Int32(0)
+comptime ACTION_MOVE = Int32(1)
+comptime ACTION_BUTTON_DOWN = Int32(2)
+comptime ACTION_BUTTON_UP = Int32(3)
+comptime ACTION_SCROLL = Int32(4)
+comptime MGESTURE_MOJO_ABI_VERSION = Int32(1)
+
+comptime STATE_PAUSED = Int32(0)
+comptime STATE_ARMED = Int32(1)
+comptime STATE_LEFT_DOWN = Int32(2)
+comptime STATE_RIGHT_DOWN = Int32(3)
+comptime STATE_SCROLL = Int32(4)
 
 
 @fieldwise_init
-struct PythonGestureEngine(Movable, Writable):
+struct MojoConfig(Copyable, Movable, Writable):
     var screen_x: Float64
     var screen_y: Float64
     var screen_width: Float64
     var screen_height: Float64
-    var mirror: Bool
-    var armed: Bool
+    var mirror: Int32
     var handedness_confidence: Float64
+    var active_left: Float64
+    var active_right: Float64
+    var active_top: Float64
+    var active_bottom: Float64
+    var pointer_gain: Float64
+    var pointer_acceleration: Float64
+    var dead_zone: Float64
+    var filter_min_cutoff: Float64
+    var filter_beta: Float64
+    var filter_derivative_cutoff: Float64
     var pinch_down_threshold: Float64
     var pinch_release_threshold: Float64
     var debounce_ms: Int64
     var release_debounce_ms: Int64
     var hand_loss_timeout_ms: Int64
     var reacquisition_ms: Int64
-    var active_left: Float64
-    var active_right: Float64
-    var active_top: Float64
-    var active_bottom: Float64
-    var pointer_gain: Float64
-    var dead_zone: Float64
     var scroll_entry_ms: Int64
     var scroll_sensitivity: Float64
-    var scroll_direction: Int64
+    var scroll_direction: Int32
     var scroll_dead_zone: Float64
-    var activation_gesture: Bool
+    var activation_gesture: Int32
     var activation_gesture_ms: Int64
     var activation_cooldown_ms: Int64
-    var held: Int
-    var down_candidate: Int
+
+
+@fieldwise_init
+struct MojoAction(Copyable, Movable, Writable):
+    var action: Int32
+    var state: Int32
+    var button: Int32
+    var state_order: Int32
+    var x: Float64
+    var y: Float64
+
+
+@fieldwise_init
+struct Measurements(Copyable, Movable, Writable):
+    var index_pinch: Float64
+    var middle_pinch: Float64
+    var palm_x: Float64
+    var palm_y: Float64
+    var index_x: Float64
+    var index_y: Float64
+    var scroll_pose: Bool
+    var open_palm: Bool
+
+
+@fieldwise_init
+struct FilteredPoint(Copyable, Movable, Writable):
+    var x: Float64
+    var y: Float64
+
+
+struct GestureEngine(Copyable, Movable, Writable):
+    var config: MojoConfig
+    var armed: Bool
+    var state: Int32
+    var held: Int32
+    var down_candidate: Int32
     var down_since_ms: Int64
     var release_since_ms: Int64
     var invalid_since_ms: Int64
@@ -47,257 +97,405 @@ struct PythonGestureEngine(Movable, Writable):
     var open_since_ms: Int64
     var last_toggle_ms: Int64
     var initialized: Bool
+    var filter_x: Float64
+    var filter_y: Float64
+    var filter_dx: Float64
+    var filter_dy: Float64
+    var filter_last_x: Float64
+    var filter_last_y: Float64
+    var filter_last_time: Float64
+    var filter_initialized: Bool
+    var derivative_initialized: Bool
 
-    @staticmethod
-    def py_init(out self: PythonGestureEngine, args: PythonObject, kwargs: PythonObject) raises:
-        _ = kwargs
-        if len(args) != 1:
-            raise Error("PythonGestureEngine(config) expects one dictionary")
-        var config = args[0]
-        var screen_x = Float64(py=config.get("screen_x"))
-        var screen_y = Float64(py=config.get("screen_y"))
-        var screen_width = Float64(py=config.get("screen_width"))
-        var screen_height = Float64(py=config.get("screen_height"))
-        var mirror = Bool(py=config.get("mirror", PythonObject(True)))
-        var armed = Bool(py=config.get("armed", PythonObject(False)))
-        var handedness_confidence = Float64(py=config.get("handedness_confidence", PythonObject(0.70)))
-        var pinch_down_threshold = Float64(py=config.get("pinch_down_threshold", PythonObject(0.45)))
-        var pinch_release_threshold = Float64(py=config.get("pinch_release_threshold", PythonObject(0.60)))
-        var debounce_ms = Int64(py=config.get("debounce_ms", PythonObject(70)))
-        var release_debounce_ms = Int64(py=config.get("release_debounce_ms", PythonObject(35)))
-        var hand_loss_timeout_ms = Int64(py=config.get("hand_loss_timeout_ms", PythonObject(250)))
-        var reacquisition_ms = Int64(py=config.get("reacquisition_ms", PythonObject(150)))
-        var active_left = Float64(py=config.get("active_left", PythonObject(0.10)))
-        var active_right = Float64(py=config.get("active_right", PythonObject(0.10)))
-        var active_top = Float64(py=config.get("active_top", PythonObject(0.10)))
-        var active_bottom = Float64(py=config.get("active_bottom", PythonObject(0.10)))
-        var pointer_gain = Float64(py=config.get("pointer_gain", PythonObject(1.0)))
-        var dead_zone = Float64(py=config.get("dead_zone", PythonObject(0.002)))
-        var scroll_entry_ms = Int64(py=config.get("scroll_entry_ms", PythonObject(180)))
-        var scroll_sensitivity = Float64(py=config.get("scroll_sensitivity", PythonObject(35.0)))
-        var scroll_direction = Int64(py=config.get("scroll_direction", PythonObject(1)))
-        var scroll_dead_zone = Float64(py=config.get("scroll_dead_zone", PythonObject(0.001)))
-        var activation_gesture = Bool(py=config.get("activation_gesture", PythonObject(True)))
-        var activation_gesture_ms = Int64(py=config.get("activation_gesture_ms", PythonObject(1000)))
-        var activation_cooldown_ms = Int64(py=config.get("activation_cooldown_ms", PythonObject(1000)))
-        self = Self(screen_x, screen_y, screen_width, screen_height, mirror, armed, handedness_confidence, pinch_down_threshold, pinch_release_threshold, debounce_ms, release_debounce_ms, hand_loss_timeout_ms, reacquisition_ms, active_left, active_right, active_top, active_bottom, pointer_gain, dead_zone, scroll_entry_ms, scroll_sensitivity, scroll_direction, scroll_dead_zone, activation_gesture, activation_gesture_ms, activation_cooldown_ms, 0, 0, 0, 0, -1, 0, -1.0, -1.0, 0.0, 0.0, False, -2, -1, 0, False)
-
-    @staticmethod
-    def process(
-        self_ptr: Pointer[mut=True, PythonGestureEngine, MutAnyOrigin],
-        landmarks: PythonObject,
-        timestamp_ms: PythonObject,
-        right_hand: PythonObject,
-        confidence: PythonObject,
-    ) raises -> PythonObject:
-        return self_ptr[].process_internal(landmarks, timestamp_ms, right_hand, confidence)
-
-    def process_internal(
-        mut self,
-        landmarks: PythonObject,
-        timestamp_ms: PythonObject,
-        right_hand: PythonObject,
-        confidence: PythonObject,
-    ) raises -> PythonObject:
-        var now = Int64(py=timestamp_ms)
-        var is_right = Bool(py=right_hand)
-        var score = Float64(py=confidence)
-        if not is_right or score < self.handedness_confidence:
-            if self.invalid_since_ms < 0:
-                self.invalid_since_ms = now
-            if self.held != 0 and now - self.invalid_since_ms >= self.hand_loss_timeout_ms:
-                var button = self.held
-                self.held = 0
-                self.release_since_ms = 0
-                return Self.result("button_up", 0.0, 0.0, button, "ARMED")
-            return Self.result("none", 0.0, 0.0, 0, "PAUSED" if not self.armed else "ARMED")
-
-        self.invalid_since_ms = -1
-        if not self.initialized:
-            self.reacquire_since_ms = now
-            self.initialized = True
-        var palm_scale = max(0.000001, 0.5 * (Self.distance(landmarks, 0, 9) + Self.distance(landmarks, 5, 17)))
-        var index_pinch = Self.distance(landmarks, 4, 8) / palm_scale
-        var middle_pinch = Self.distance(landmarks, 4, 12) / palm_scale
-        var palm_y = (Self.coord(landmarks, 0, 1) + Self.coord(landmarks, 5, 1) + Self.coord(landmarks, 9, 1) + Self.coord(landmarks, 13, 1) + Self.coord(landmarks, 17, 1)) / 5.0
-        var open_palm = Self.finger_extended(landmarks, 8, 6, 5) and Self.finger_extended(landmarks, 12, 10, 9) and Self.finger_extended(landmarks, 16, 14, 13) and Self.finger_extended(landmarks, 20, 18, 17)
-        var scroll_pose = Self.finger_extended(landmarks, 8, 6, 5) and Self.finger_extended(landmarks, 12, 10, 9) and not Self.finger_extended(landmarks, 16, 14, 13) and not Self.finger_extended(landmarks, 20, 18, 17) and middle_pinch > self.pinch_release_threshold
-        var index_x = Self.coord(landmarks, 8, 0)
-        var index_y = Self.coord(landmarks, 8, 1)
-        var now_x = (index_x - self.active_left) / max(0.000001, 1.0 - self.active_left - self.active_right)
-        var now_y = (index_y - self.active_top) / max(0.000001, 1.0 - self.active_top - self.active_bottom)
-        if self.mirror:
-            now_x = 1.0 - now_x
-        now_x = 0.5 + (now_x - 0.5) * self.pointer_gain
-        now_y = 0.5 + (now_y - 0.5) * self.pointer_gain
-        now_x = min(1.0, max(0.0, now_x))
-        now_y = min(1.0, max(0.0, now_y))
-        var out_x = self.screen_x + now_x * max(1.0, self.screen_width - 1.0)
-        var out_y = self.screen_y + now_y * max(1.0, self.screen_height - 1.0)
-        if now - self.reacquire_since_ms < self.reacquisition_ms:
-            return Self.result("none", out_x, out_y, 0, "ARMED" if self.armed else "PAUSED")
-        var pointer_quiet = self.last_x >= 0.0 and sqrt((now_x - self.last_x) * (now_x - self.last_x) + (now_y - self.last_y) * (now_y - self.last_y)) < self.dead_zone
-        if not pointer_quiet:
-            self.last_x = now_x
-            self.last_y = now_y
-        if self.activation_gesture:
-            if open_palm:
-                if self.open_since_ms < 0:
-                    self.open_since_ms = now
-                elif now - self.open_since_ms >= self.activation_gesture_ms and now - self.last_toggle_ms >= self.activation_cooldown_ms:
-                    var button = self.held
-                    self.last_toggle_ms = now
-                    self.open_since_ms = -1
-                    self.armed = not self.armed
-                    self.held = 0
-                    self.last_x = -1.0
-                    self.last_y = -1.0
-                    if button != 0 and not self.armed:
-                        return Self.result("button_up", out_x, out_y, button, "PAUSED")
-                    return Self.result("none", out_x, out_y, 0, "ARMED" if self.armed else "PAUSED")
-            else:
-                self.open_since_ms = -1
-        if not self.armed:
-            return Self.result("none", out_x, out_y, 0, "PAUSED")
-
-        var left_pressed = index_pinch <= self.pinch_down_threshold
-        var right_pressed = middle_pinch <= self.pinch_down_threshold
-        if self.held != 0:
-            var still_pressed = (self.held == 1 and index_pinch <= self.pinch_release_threshold) or (self.held == 2 and middle_pinch <= self.pinch_release_threshold)
-            if not still_pressed:
-                if self.release_since_ms == 0:
-                    self.release_since_ms = now
-                if now - self.release_since_ms >= self.release_debounce_ms:
-                    var button = self.held
-                    self.held = 0
-                    self.release_since_ms = 0
-                    return Self.result("button_up", out_x, out_y, button, "ARMED")
-            else:
-                self.release_since_ms = 0
-                return Self.result("none" if pointer_quiet else "move_absolute", out_x, out_y, self.held, "LEFT DOWN" if self.held == 1 else "RIGHT DOWN")
-            return Self.result("none" if pointer_quiet else "move_absolute", out_x, out_y, self.held, "LEFT DOWN" if self.held == 1 else "RIGHT DOWN")
-
-        if scroll_pose and not right_pressed and not left_pressed:
-            if self.scroll_entry_since_ms < 0:
-                self.scroll_entry_since_ms = now
-            if now - self.scroll_entry_since_ms >= self.scroll_entry_ms:
-                if not self.scroll_active:
-                    self.scroll_active = True
-                    self.last_palm_y = palm_y
-                    return Self.result("none", out_x, out_y, 0, "SCROLL")
-                var dy = palm_y - self.last_palm_y
-                self.last_palm_y = palm_y
-                if abs(dy) >= self.scroll_dead_zone:
-                    self.scroll_remainder += -dy * self.scroll_sensitivity * Float64(self.scroll_direction)
-                    var steps = Int(self.scroll_remainder)
-                    if steps != 0:
-                        self.scroll_remainder -= Float64(steps)
-                        return Self.result("scroll", 0.0, Float64(steps), 0, "SCROLL")
-                return Self.result("none", out_x, out_y, 0, "SCROLL")
-        else:
-            self.scroll_entry_since_ms = -2
-            self.scroll_remainder = 0.0
-            if self.scroll_active:
-                self.scroll_active = False
-                return Self.result("move_absolute", out_x, out_y, 0, "ARMED")
-
-        if right_pressed:
-            if self.down_candidate != 2:
-                self.down_candidate = 2
-                self.down_since_ms = now
-            if now - self.down_since_ms >= self.debounce_ms:
-                self.held = 2
-                self.down_candidate = 0
-                return Self.result("button_down", out_x, out_y, 2, "RIGHT DOWN")
-            return Self.result("move_absolute", out_x, out_y, 0, "ARMED")
-        if left_pressed:
-            if self.down_candidate != 1:
-                self.down_candidate = 1
-                self.down_since_ms = now
-            if now - self.down_since_ms >= self.debounce_ms:
-                self.held = 1
-                self.down_candidate = 0
-                return Self.result("button_down", out_x, out_y, 1, "LEFT DOWN")
-            return Self.result("move_absolute", out_x, out_y, 0, "ARMED")
-        self.down_candidate = 0
-        self.scroll_active = False
-        return Self.result("none" if pointer_quiet else "move_absolute", out_x, out_y, 0, "ARMED")
-
-    @staticmethod
-    def reset(self_ptr: Pointer[mut=True, PythonGestureEngine, MutAnyOrigin], reason: PythonObject) raises -> PythonObject:
-        return self_ptr[].reset_internal(reason)
-
-    def reset_internal(mut self, reason: PythonObject) raises -> PythonObject:
-        _ = reason
-        var button = self.held
+    def __init__(out self, config: MojoConfig, armed: Int32):
+        self.config = config.copy()
+        self.armed = armed != 0
+        self.state = STATE_ARMED if self.armed else STATE_PAUSED
         self.held = 0
         self.down_candidate = 0
+        self.down_since_ms = 0
         self.release_since_ms = 0
         self.invalid_since_ms = -1
         self.reacquire_since_ms = 0
         self.last_x = -1.0
         self.last_y = -1.0
+        self.last_palm_y = -1.0
+        self.scroll_remainder = 0.0
         self.scroll_active = False
         self.scroll_entry_since_ms = -2
-        self.scroll_remainder = 0.0
         self.open_since_ms = -1
+        self.last_toggle_ms = 0
         self.initialized = False
-        if button != 0:
-            return Self.result("button_up", 0.0, 0.0, button, "ARMED" if self.armed else "PAUSED")
-        return Self.result("none", 0.0, 0.0, 0, "ARMED" if self.armed else "PAUSED")
+        self.filter_x = 0.0
+        self.filter_y = 0.0
+        self.filter_dx = 0.0
+        self.filter_dy = 0.0
+        self.filter_last_x = 0.0
+        self.filter_last_y = 0.0
+        self.filter_last_time = 0.0
+        self.filter_initialized = False
+        self.derivative_initialized = False
 
     @staticmethod
-    def set_armed(self_ptr: Pointer[mut=True, PythonGestureEngine, MutAnyOrigin], value: PythonObject) raises -> PythonObject:
-        return self_ptr[].set_armed_internal(value)
+    def create(config: MojoConfig, armed: Int32) -> Self:
+        return Self(config, armed)
 
-    def set_armed_internal(mut self, value: PythonObject) raises -> PythonObject:
-        var button = self.held
-        self.armed = Bool(py=value)
+    def initialize(mut self, config: MojoConfig, armed: Int32):
+        self.config = config.copy()
+        self.armed = armed != 0
+        self.state = STATE_ARMED if self.armed else STATE_PAUSED
         self.held = 0
         self.down_candidate = 0
+        self.down_since_ms = 0
+        self.release_since_ms = 0
+        self.invalid_since_ms = -1
+        self.reacquire_since_ms = 0
         self.last_x = -1.0
         self.last_y = -1.0
+        self.last_palm_y = -1.0
+        self.scroll_remainder = 0.0
         self.scroll_active = False
         self.scroll_entry_since_ms = -2
+        self.open_since_ms = -1
+        self.last_toggle_ms = 0
+        self.initialized = False
+
+    def reset_transient(mut self):
+        self.down_candidate = 0
+        self.down_since_ms = 0
+        self.release_since_ms = 0
+        self.invalid_since_ms = -1
+        self.reacquire_since_ms = 0
+        self.last_x = -1.0
+        self.last_y = -1.0
+        self.last_palm_y = -1.0
         self.scroll_remainder = 0.0
+        self.scroll_active = False
+        self.scroll_entry_since_ms = -2
         self.open_since_ms = -1
         self.initialized = False
+        self.filter_x = 0.0
+        self.filter_y = 0.0
+        self.filter_dx = 0.0
+        self.filter_dy = 0.0
+        self.filter_last_x = 0.0
+        self.filter_last_y = 0.0
+        self.filter_last_time = 0.0
+        self.filter_initialized = False
+        self.derivative_initialized = False
+
+    def reset_internal(mut self) -> MojoAction:
+        var button = self.held
+        self.held = 0
+        self.reset_transient()
+        self.state = STATE_ARMED if self.armed else STATE_PAUSED
+        if button != 0:
+            return Self.result_after(ACTION_BUTTON_UP, 0.0, 0.0, button, self.state)
+        return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+
+    def set_armed_internal(mut self, value: Int32) -> MojoAction:
+        var button = self.held
+        self.armed = value != 0
+        self.held = 0
+        self.reset_transient()
+        self.state = STATE_ARMED if self.armed else STATE_PAUSED
         if button != 0 and not self.armed:
-            return Self.result("button_up", 0.0, 0.0, button, "PAUSED")
-        return Self.result("none", 0.0, 0.0, 0, "ARMED" if self.armed else "PAUSED")
+            return Self.result_after(ACTION_BUTTON_UP, 0.0, 0.0, button, STATE_PAUSED)
+        return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
 
     @staticmethod
-    def coord(landmarks: PythonObject, point: Int, axis: Int) raises -> Float64:
-        return Float64(py=landmarks[point * 3 + axis])
+    def coord(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], point: Int, axis: Int) -> Float64:
+        return Float64(landmarks[unsafe_offset=point * 3 + axis])
 
     @staticmethod
-    def distance(landmarks: PythonObject, first: Int, second: Int) raises -> Float64:
+    def distance(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], first: Int, second: Int) -> Float64:
         var dx = Self.coord(landmarks, first, 0) - Self.coord(landmarks, second, 0)
         var dy = Self.coord(landmarks, first, 1) - Self.coord(landmarks, second, 1)
         var dz = Self.coord(landmarks, first, 2) - Self.coord(landmarks, second, 2)
         return sqrt(dx * dx + dy * dy + dz * dz)
 
     @staticmethod
-    def finger_extended(landmarks: PythonObject, tip: Int, pip: Int, mcp: Int) raises -> Bool:
+    def finger_extended(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], tip: Int, pip: Int, mcp: Int) -> Bool:
         return Self.distance(landmarks, tip, mcp) > Self.distance(landmarks, pip, mcp) * 1.25
 
+    def measure(self, landmarks: Pointer[mut=True, Float32, MutAnyOrigin]) -> Measurements:
+        var palm_scale = max(0.000001, 0.5 * (Self.distance(landmarks, 0, 9) + Self.distance(landmarks, 5, 17)))
+        var index_pinch = Self.distance(landmarks, 4, 8) / palm_scale
+        var middle_pinch = Self.distance(landmarks, 4, 12) / palm_scale
+        var palm_x = (Self.coord(landmarks, 0, 0) + Self.coord(landmarks, 5, 0) + Self.coord(landmarks, 9, 0) + Self.coord(landmarks, 13, 0) + Self.coord(landmarks, 17, 0)) / 5.0
+        var palm_y = (Self.coord(landmarks, 0, 1) + Self.coord(landmarks, 5, 1) + Self.coord(landmarks, 9, 1) + Self.coord(landmarks, 13, 1) + Self.coord(landmarks, 17, 1)) / 5.0
+        var index_x = Self.coord(landmarks, 8, 0)
+        var index_y = Self.coord(landmarks, 8, 1)
+        var index_extended = Self.finger_extended(landmarks, 8, 6, 5)
+        var middle_extended = Self.finger_extended(landmarks, 12, 10, 9)
+        var ring_extended = Self.finger_extended(landmarks, 16, 14, 13)
+        var pinky_extended = Self.finger_extended(landmarks, 20, 18, 17)
+        var scroll_pose = index_extended and middle_extended and not ring_extended and not pinky_extended and middle_pinch > self.config.pinch_release_threshold
+        var open_palm = index_extended and middle_extended and ring_extended and pinky_extended
+        return Measurements(index_pinch, middle_pinch, palm_x, palm_y, index_x, index_y, scroll_pose, open_palm)
 
     @staticmethod
-    def result(action: String, x: Float64, y: Float64, button: Int, state: String) raises -> PythonObject:
-        return Python.dict(
-            action=PythonObject(action),
-            x=PythonObject(x),
-            y=PythonObject(y),
-            button=PythonObject(button),
-            state=PythonObject(state),
-        )
+    def alpha(cutoff: Float64, dt: Float64) -> Float64:
+        var tau = 1.0 / (6.283185307179586 * max(cutoff, 0.000001))
+        return 1.0 / (1.0 + tau / max(dt, 0.000001))
+
+    def filter_point(mut self, x: Float64, y: Float64, timestamp_ms: Int64) -> FilteredPoint:
+        var timestamp_s = Float64(timestamp_ms) / 1000.0
+        if not self.filter_initialized:
+            self.filter_initialized = True
+            self.filter_last_x = x
+            self.filter_last_y = y
+            self.filter_last_time = timestamp_s
+            self.filter_x = x
+            self.filter_y = y
+            return FilteredPoint(x, y)
+        var dt = max(timestamp_s - self.filter_last_time, 0.0001)
+        var raw_dx = (x - self.filter_last_x) / dt
+        var raw_dy = (y - self.filter_last_y) / dt
+        if not self.derivative_initialized:
+            self.filter_dx = raw_dx
+            self.filter_dy = raw_dy
+            self.derivative_initialized = True
+        else:
+            var derivative_alpha = Self.alpha(self.config.filter_derivative_cutoff, dt)
+            self.filter_dx = derivative_alpha * raw_dx + (1.0 - derivative_alpha) * self.filter_dx
+            self.filter_dy = derivative_alpha * raw_dy + (1.0 - derivative_alpha) * self.filter_dy
+        var x_alpha = Self.alpha(self.config.filter_min_cutoff + self.config.filter_beta * abs(self.filter_dx), dt)
+        var y_alpha = Self.alpha(self.config.filter_min_cutoff + self.config.filter_beta * abs(self.filter_dy), dt)
+        self.filter_x = x_alpha * x + (1.0 - x_alpha) * self.filter_x
+        self.filter_y = y_alpha * y + (1.0 - y_alpha) * self.filter_y
+        self.filter_last_x = x
+        self.filter_last_y = y
+        self.filter_last_time = timestamp_s
+        return FilteredPoint(self.filter_x, self.filter_y)
+
+    def pointer(mut self, measurements: Measurements, timestamp_ms: Int64) -> MojoAction:
+        var filtered = self.filter_point(measurements.index_x, measurements.index_y, timestamp_ms)
+        var now_x = (filtered.x - self.config.active_left) / max(0.000001, 1.0 - self.config.active_left - self.config.active_right)
+        var now_y = (filtered.y - self.config.active_top) / max(0.000001, 1.0 - self.config.active_top - self.config.active_bottom)
+        if self.config.mirror != 0:
+            now_x = 1.0 - now_x
+        var gain = max(0.1, self.config.pointer_gain)
+        now_x = 0.5 + (now_x - 0.5) * gain
+        now_y = 0.5 + (now_y - 0.5) * gain
+        now_x = min(1.0, max(0.0, now_x))
+        now_y = min(1.0, max(0.0, now_y))
+        var out_x = self.config.screen_x + now_x * max(1.0, self.config.screen_width - 1.0)
+        var out_y = self.config.screen_y + now_y * max(1.0, self.config.screen_height - 1.0)
+        var quiet = self.last_x >= 0.0 and sqrt((filtered.x - self.last_x) * (filtered.x - self.last_x) + (filtered.y - self.last_y) * (filtered.y - self.last_y)) < self.config.dead_zone
+        if not quiet:
+            self.last_x = filtered.x
+            self.last_y = filtered.y
+            return Self.result(ACTION_MOVE, out_x, out_y, 0, self.state)
+        return Self.result(ACTION_NONE, out_x, out_y, 0, self.state)
+
+    def process(mut self, landmarks: Pointer[mut=True, Float32, MutAnyOrigin], timestamp_ms: Int64, right_hand: Int32, confidence: Float64) -> MojoAction:
+        if right_hand == 0 or confidence < self.config.handedness_confidence:
+            if self.invalid_since_ms < 0:
+                self.invalid_since_ms = timestamp_ms
+            if self.held != 0 and timestamp_ms - self.invalid_since_ms >= self.config.hand_loss_timeout_ms:
+                return self.reset_internal()
+            return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+
+        self.invalid_since_ms = -1
+        if not self.initialized:
+            self.reacquire_since_ms = timestamp_ms
+            self.initialized = True
+        var measurements = self.measure(landmarks)
+        if self.config.activation_gesture != 0 and measurements.open_palm:
+            if self.open_since_ms < 0:
+                self.open_since_ms = timestamp_ms
+            elif timestamp_ms - self.open_since_ms >= self.config.activation_gesture_ms and timestamp_ms - self.last_toggle_ms >= self.config.activation_cooldown_ms:
+                var button = self.held
+                self.last_toggle_ms = timestamp_ms
+                self.open_since_ms = -1
+                self.armed = not self.armed
+                self.held = 0
+                self.last_x = -1.0
+                self.last_y = -1.0
+                if button != 0 and not self.armed:
+                    self.state = STATE_PAUSED
+                    return Self.result_after(ACTION_BUTTON_UP, 0.0, 0.0, button, self.state)
+                self.state = STATE_ARMED if self.armed else STATE_PAUSED
+                return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+        else:
+            self.open_since_ms = -1
+
+        if not self.armed or timestamp_ms - self.reacquire_since_ms < self.config.reacquisition_ms:
+            self.state = STATE_ARMED if self.armed else STATE_PAUSED
+            return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+
+        var left_pressed = measurements.index_pinch <= self.config.pinch_down_threshold
+        var right_pressed = measurements.middle_pinch <= self.config.pinch_down_threshold
+        if self.held != 0:
+            var still_pressed = (self.held == 1 and measurements.index_pinch <= self.config.pinch_release_threshold) or (self.held == 2 and measurements.middle_pinch <= self.config.pinch_release_threshold)
+            if not still_pressed:
+                if self.release_since_ms == 0:
+                    self.release_since_ms = timestamp_ms
+                if timestamp_ms - self.release_since_ms >= self.config.release_debounce_ms:
+                    var button = self.held
+                    self.held = 0
+                    self.reset_transient()
+                    self.state = STATE_ARMED
+                    return Self.result_after(ACTION_BUTTON_UP, 0.0, 0.0, button, self.state)
+            else:
+                self.release_since_ms = 0
+            var pointer = self.pointer(measurements, timestamp_ms)
+            self.state = STATE_LEFT_DOWN if self.held == 1 else STATE_RIGHT_DOWN
+            pointer.button = self.held
+            pointer.state = self.state
+            return pointer^
+
+        if right_pressed:
+            if self.down_candidate != 2:
+                self.down_candidate = 2
+                self.down_since_ms = timestamp_ms
+            if timestamp_ms - self.down_since_ms >= self.config.debounce_ms:
+                self.held = 2
+                self.down_candidate = 0
+                self.state = STATE_RIGHT_DOWN
+                return Self.result(ACTION_BUTTON_DOWN, 0.0, 0.0, 2, self.state)
+            var pointer = self.pointer(measurements, timestamp_ms)
+            self.state = STATE_ARMED
+            return Self.result(ACTION_MOVE, pointer.x, pointer.y, 0, self.state)
+        if left_pressed:
+            if self.down_candidate != 1:
+                self.down_candidate = 1
+                self.down_since_ms = timestamp_ms
+            if timestamp_ms - self.down_since_ms >= self.config.debounce_ms:
+                self.held = 1
+                self.down_candidate = 0
+                self.state = STATE_LEFT_DOWN
+                return Self.result(ACTION_BUTTON_DOWN, 0.0, 0.0, 1, self.state)
+            var pointer = self.pointer(measurements, timestamp_ms)
+            self.state = STATE_ARMED
+            return Self.result(ACTION_MOVE, pointer.x, pointer.y, 0, self.state)
+
+        if measurements.scroll_pose:
+            if self.scroll_entry_since_ms < 0:
+                self.scroll_entry_since_ms = timestamp_ms
+            if timestamp_ms - self.scroll_entry_since_ms >= self.config.scroll_entry_ms:
+                if not self.scroll_active:
+                    self.scroll_active = True
+                    self.last_palm_y = measurements.palm_y
+                    self.state = STATE_SCROLL
+                    return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+                var dy = measurements.palm_y - self.last_palm_y
+                self.last_palm_y = measurements.palm_y
+                if abs(dy) >= self.config.scroll_dead_zone:
+                    self.scroll_remainder += -dy * self.config.scroll_sensitivity * Float64(self.config.scroll_direction)
+                    var steps = Int32(self.scroll_remainder)
+                    if steps != 0:
+                        self.scroll_remainder -= Float64(steps)
+                        self.state = STATE_SCROLL
+                        return Self.result(ACTION_SCROLL, 0.0, Float64(steps), 0, self.state)
+                self.state = STATE_SCROLL
+                return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+        else:
+            self.scroll_entry_since_ms = -2
+            self.scroll_remainder = 0.0
+            if self.scroll_active:
+                self.scroll_active = False
+                self.state = STATE_ARMED
+                var pointer = self.pointer(measurements, timestamp_ms)
+                return pointer^
+
+        self.down_candidate = 0
+        self.down_since_ms = 0
+        self.state = STATE_ARMED
+        var pointer = self.pointer(measurements, timestamp_ms)
+        pointer.state = self.state
+        return pointer^
+
+    @staticmethod
+    def result(action: Int32, x: Float64, y: Float64, button: Int32, state: Int32) -> MojoAction:
+        return MojoAction(action, state, button, 0, x, y)
+
+    @staticmethod
+    def result_after(action: Int32, x: Float64, y: Float64, button: Int32, state: Int32) -> MojoAction:
+        return MojoAction(action, state, button, 1, x, y)
 
 
-@export
-def PyInit_mgesture_core() abi("C") -> PythonObject:
-    try:
-        var module = PythonModuleBuilder("mgesture_core")
-        _ = module.add_type[PythonGestureEngine]("PythonGestureEngine").def_py_init[PythonGestureEngine.py_init]().def_method[PythonGestureEngine.process]("process").def_method[PythonGestureEngine.reset]("reset").def_method[PythonGestureEngine.set_armed]("set_armed")
-        return module.finalize()
-    except e:
-        abort(String("failed to initialize mgesture_core: ", e))
+@export("mgesture_mojo_abi_version")
+def mgesture_mojo_abi_version() abi("C") -> Int32:
+    return MGESTURE_MOJO_ABI_VERSION
+
+
+@export("mgesture_mojo_config_size")
+def mgesture_mojo_config_size() abi("C") -> Int64:
+    return Int64(size_of[MojoConfig]())
+
+
+@export("mgesture_mojo_config_alignment")
+def mgesture_mojo_config_alignment() abi("C") -> Int64:
+    return Int64(align_of[MojoConfig]())
+
+
+@export("mgesture_mojo_action_size")
+def mgesture_mojo_action_size() abi("C") -> Int64:
+    return Int64(size_of[MojoAction]())
+
+
+@export("mgesture_mojo_action_alignment")
+def mgesture_mojo_action_alignment() abi("C") -> Int64:
+    return Int64(align_of[MojoAction]())
+
+
+@export("mgesture_mojo_engine_size")
+def mgesture_mojo_engine_size() abi("C") -> Int64:
+    return Int64(size_of[GestureEngine]())
+
+
+@export("mgesture_mojo_engine_alignment")
+def mgesture_mojo_engine_alignment() abi("C") -> Int64:
+    return Int64(align_of[GestureEngine]())
+
+
+@export("mgesture_mojo_engine_init")
+def mgesture_mojo_engine_init(
+    engine: Pointer[mut=True, GestureEngine, MutAnyOrigin],
+    config: Pointer[mut=False, MojoConfig, ImmutAnyOrigin],
+    armed: Int32,
+) abi("C") -> Int32:
+    engine[].initialize(config[], armed)
+    return 0
+
+
+@export("mgesture_mojo_engine_reset")
+def mgesture_mojo_engine_reset(
+    engine: Pointer[mut=True, GestureEngine, MutAnyOrigin],
+    output: Pointer[mut=True, MojoAction, MutAnyOrigin],
+) abi("C") -> Int32:
+    output[] = engine[].reset_internal()
+    return 0
+
+
+@export("mgesture_mojo_engine_set_armed")
+def mgesture_mojo_engine_set_armed(
+    engine: Pointer[mut=True, GestureEngine, MutAnyOrigin],
+    armed: Int32,
+    output: Pointer[mut=True, MojoAction, MutAnyOrigin],
+) abi("C") -> Int32:
+    output[] = engine[].set_armed_internal(armed)
+    return 0
+
+
+@export("mgesture_mojo_engine_process")
+def mgesture_mojo_engine_process(
+    engine: Pointer[mut=True, GestureEngine, MutAnyOrigin],
+    landmarks: Pointer[mut=True, Float32, MutAnyOrigin],
+    timestamp_ms: Int64,
+    right_hand: Int32,
+    confidence: Float64,
+    output: Pointer[mut=True, MojoAction, MutAnyOrigin],
+) abi("C") -> Int32:
+    output[] = engine[].process(landmarks, timestamp_ms, right_hand, confidence)
+    return 0
+
+
+@export("mgesture_mojo_engine_destroy")
+def mgesture_mojo_engine_destroy(
+    engine: Pointer[mut=True, GestureEngine, MutAnyOrigin],
+) abi("C") -> Int32:
+    _ = engine[].reset_internal()
+    return 0

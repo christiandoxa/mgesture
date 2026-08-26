@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -55,17 +56,19 @@ def test_stable_targets_expose_all_source_capabilities() -> None:
     assert source["available"] is True
     assert "mgesture_core.mojo" in source["files"]
     assert len(str(source["sha256"])) == 64
-    assert any(target.mojo_source and not target.native_mojo_engine for target in targets.values())
+    assert all(isinstance(target.native_mojo_engine, bool) for target in targets.values())
 
 
 def test_ci_matrix_uses_all_stable_targets_and_native_runners() -> None:
     rows = ci_matrix()
     assert len(rows) == 6
     assert {row["target"] for row in rows} == STABLE_TARGETS
-    assert {row["mojo_ci_mode"] for row in rows} == {"native", "source-contract"}
+    assert {row["mojo_ci_mode"] for row in rows} == {"native"}
+    assert {row["mojo_build_mode"] for row in rows} == {"native", "cross-object"}
     targets = publishable_targets()
     assert {row["target"] for row in rows} == set(targets)
     assert all(row["runner"] == targets[row["target"]].runner for row in rows)
+    assert all(row["asset"] == targets[row["target"]].asset for row in rows)
 
 
 def test_readme_capability_table_matches_target_matrix() -> None:
@@ -118,13 +121,22 @@ def _release_fixture(path: Path) -> None:
         encoding="utf-8",
     )
     binary.chmod(0o755)
+    runtime = path / "bundle" / "mgesture" / "runtime" / "mojo"
+    runtime.mkdir(parents=True)
+    for name in ("libmgesture_mojo.so", "libmgesture_mojo.dylib", "mgesture_mojo.dll"):
+        (runtime / name).write_bytes(b"native Mojo fixture")
     for release_target in publishable_targets().values():
         archive_path = path / release_target.asset
         if release_target.format == "tar.gz":
             with tarfile.open(archive_path, "w:gz") as archive:
                 archive.add(path / "bundle" / "mgesture", arcname="mgesture")
         else:
-            archive_path.write_bytes(b"fixture placeholder")
+            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                for file in (path / "bundle" / "mgesture").rglob("*"):
+                    if file.is_file():
+                        archive.write(
+                            file, Path("mgesture") / file.relative_to(path / "bundle" / "mgesture")
+                        )
     (path / "install.sh").write_bytes((ROOT / "install.sh").read_bytes())
     (path / "install.ps1").write_bytes((ROOT / "install.ps1").read_bytes())
     subprocess.run(
@@ -139,6 +151,20 @@ def _release_fixture(path: Path) -> None:
             str(path),
             "--output",
             str(path),
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/release/sbom.py",
+            "--version",
+            "0.1.0",
+            "--assets",
+            str(path),
+            "--output",
+            str(path / "mgesture-sbom.spdx.json"),
         ],
         cwd=ROOT,
         check=True,

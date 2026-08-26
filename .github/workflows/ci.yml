@@ -27,6 +27,41 @@ jobs:
           echo "targets=${targets}" >> "$GITHUB_OUTPUT"
           echo "CI matrix: ${targets}"
 
+  build_mojo_objects:
+    name: Build cross-target Mojo objects
+    needs: prepare_matrix
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: v0.77.1
+          run-install: false
+          cache: false
+      - name: Install environment
+        run: pixi install --locked
+      - name: Inspect Mojo compiler targets
+        run: |
+          pixi run mojo --version
+          pixi run mojo build --print-supported-targets
+      - name: Emit cross-target Mojo objects
+        run: pixi run python scripts/release/build_mojo_objects.py --output-dir mojo-objects
+      - name: Validate cross-target object set
+        run: |
+          test "$(find mojo-objects -maxdepth 1 -type f -name '*.o' | wc -l)" = 3
+      - name: Run canonical Mojo tests
+        run: pixi run mojo-test
+      - name: Upload cross-target Mojo objects
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mojo-cross-objects
+          path: mojo-objects
+          if-no-files-found: error
+
   python:
     needs: prepare_matrix
     name: Python ${{ matrix.target }}
@@ -77,12 +112,8 @@ jobs:
         run: pixi run build
       - name: Package and release metadata checks
         run: pixi run release-check
-      - name: Confirm native Windows Mojo failure is explicit
-        if: runner.os == 'Windows'
-        run: pixi run python scripts/release/check_mojo_unavailable.py
-
   mojo:
-    needs: prepare_matrix
+    needs: [prepare_matrix, build_mojo_objects]
     name: Mojo ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -108,13 +139,19 @@ jobs:
           echo "PIXI_CACHE_DIR=C:\\p" >> $env:GITHUB_ENV
       - name: Install environment
         run: pixi install --locked
+      - name: Download cross-target Mojo object
+        if: matrix.mojo_build_mode == 'cross-object'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: mojo-cross-objects
+          path: mojo-objects
       - name: Validate native runner architecture
         run: pixi run python scripts/release/validate_architecture.py runner --target ${{ matrix.target }}
       - name: Validate canonical target row
         run: >-
           pixi run python -c
           "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
-          row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.runner }}' and row.mojo_ci_mode == '${{ matrix.mojo_ci_mode }}'"
+          row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.runner }}' and row.mojo_ci_mode == '${{ matrix.mojo_ci_mode }}' and row.mojo_build_mode == '${{ matrix.mojo_build_mode }}'"
       - name: Validate canonical Mojo source
         run: pixi run python scripts/release/validate_mojo_source.py
       - name: Summarize Mojo validation mode
@@ -123,27 +160,42 @@ jobs:
           MODE: ${{ matrix.mojo_ci_mode }}
         run: |
           pixi run python -c "import os; from pathlib import Path; n=chr(10); mode=os.environ['MODE']; Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('## Mojo validation'+n+n+'- Target: '+os.environ['TARGET']+n+'- Mojo source: available'+n+'- Validation mode: '+mode+n+'- Native Mojo runtime: '+('available' if mode == 'native' else 'unavailable')+n+'- Python fallback: available'+n)"
-      - name: Validate expected native Mojo unavailability
-        if: matrix.mojo_ci_mode == 'source-contract'
-        run: pixi run python scripts/release/check_mojo_unavailable.py --target ${{ matrix.target }}
-      - name: Show Mojo version
-        if: matrix.mojo_ci_mode == 'native'
+      - name: Build native Mojo library (Linux)
+        if: matrix.mojo_build_mode == 'native' && runner.os == 'Linux'
+        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --output build/libmgesture_mojo.so
+      - name: Build native Mojo library (macOS)
+        if: matrix.mojo_build_mode == 'native' && runner.os == 'macOS'
+        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --output build/libmgesture_mojo.dylib
+      - name: Link cross-target Mojo library (macOS)
+        if: matrix.mojo_build_mode == 'cross-object' && runner.os == 'macOS'
+        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --object mojo-objects/${{ matrix.target }}.o --output build/libmgesture_mojo.dylib
+      - name: Link cross-target Mojo library (Windows)
+        if: matrix.mojo_build_mode == 'cross-object' && runner.os == 'Windows'
+        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --object mojo-objects/${{ matrix.target }}.o --output build/mgesture_mojo.dll
+      - name: Validate native Mojo ABI (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          library=build/libmgesture_mojo.so
+          if [ "$RUNNER_OS" = macOS ]; then library=build/libmgesture_mojo.dylib; fi
+          pixi run python scripts/release/validate_mojo_abi.py --target "${{ matrix.target }}" --library "$library"
+      - name: Validate native Mojo ABI (Windows)
+        if: runner.os == 'Windows'
+        run: pixi run python scripts/release/validate_mojo_abi.py --target ${{ matrix.target }} --library build/mgesture_mojo.dll
+      - name: Show native Mojo compiler version
+        if: matrix.mojo_build_mode == 'native'
         run: pixi run mojo --version
-      - name: Compile Mojo
-        if: matrix.mojo_ci_mode == 'native'
-        run: pixi run mojo-build
-      - name: Mojo tests
-        if: matrix.mojo_ci_mode == 'native'
+      - name: Mojo native tests
+        if: matrix.mojo_build_mode == 'native'
         run: pixi run mojo-test
       - name: Python/Mojo parity tests
-        if: matrix.mojo_ci_mode == 'native'
         run: pixi run pytest -q tests/unit/test_mojo_parity.py
       - name: Deterministic reference tests
         run: pixi run test
       - name: Headless fake-input self-test
-        run: pixi run python -m mgesture self-test --headless --fake-input
+        run: pixi run python -m mgesture self-test --headless --fake-input --engine mojo
       - name: Deterministic replay
-        run: pixi run replay
+        run: pixi run python -m mgesture replay --engine mojo
 
   release-dry-run:
     name: Standalone Linux dry run
@@ -171,5 +223,8 @@ jobs:
           pixi run package-local
           mkdir -p "$RUNNER_TEMP/mgesture-smoke"
           tar -xzf dist/mgesture-x86_64-unknown-linux-gnu.tar.gz -C "$RUNNER_TEMP/mgesture-smoke"
+          pixi run python scripts/release/validate_mojo_source.py --root "$RUNNER_TEMP/mgesture-smoke/mgesture"
+          pixi run python scripts/release/validate_architecture.py bundle --target x86_64-unknown-linux-gnu --root "$RUNNER_TEMP/mgesture-smoke/mgesture"
           "$RUNNER_TEMP/mgesture-smoke/mgesture/bin/mgesture" --version
-          "$RUNNER_TEMP/mgesture-smoke/mgesture/bin/mgesture" self-test --headless --fake-input
+          "$RUNNER_TEMP/mgesture-smoke/mgesture/bin/mgesture" self-test --headless --fake-input --engine mojo
+          "$RUNNER_TEMP/mgesture-smoke/mgesture/bin/mgesture" replay --engine mojo --fixture "$RUNNER_TEMP/mgesture-smoke/mgesture/share/mgesture/fixtures/basic.json" >/dev/null

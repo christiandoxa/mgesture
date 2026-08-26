@@ -76,8 +76,8 @@ try {
     $OldRoot = $env:MGESTURE_BUNDLE_ROOT
     try {
         $env:MGESTURE_BUNDLE_ROOT = $StagedRoot
-        & $Binary self-test --headless --fake-input | Out-Null
-        if ($LASTEXITCODE -ne 0) { Fail "staged self-test failed" }
+        & $Binary self-test --headless --fake-input --engine mojo | Out-Null
+        if ($LASTEXITCODE -ne 0) { Fail "staged native Mojo self-test failed" }
         & $Binary doctor --runtime --json | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "staged runtime diagnostics failed" }
     } finally { $env:MGESTURE_BUNDLE_ROOT = $OldRoot }
