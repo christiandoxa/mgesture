@@ -45,9 +45,6 @@ MOJO_EXPORTS = (
 
 
 def find_windows_tool(name: str) -> str | None:
-    command = shutil.which(name)
-    if command is not None:
-        return command
     vswhere = shutil.which("vswhere.exe")
     if vswhere is None:
         program_files_x86 = os.environ.get("ProgramFiles(x86)")
@@ -57,15 +54,19 @@ def find_windows_tool(name: str) -> str | None:
             )
             if candidate.is_file():
                 vswhere = str(candidate)
-    if vswhere is None:
-        return None
-    result = subprocess.run(
-        [vswhere, "-latest", "-products", "*", "-find", f"**\\{name}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return next((line.strip() for line in result.stdout.splitlines() if line.strip()), None)
+    if vswhere is not None:
+        result = subprocess.run(
+            [vswhere, "-latest", "-products", "*", "-find", f"**\\{name}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        visual_studio_tool = next(
+            (line.strip() for line in result.stdout.splitlines() if line.strip()), None
+        )
+        if visual_studio_tool is not None:
+            return visual_studio_tool
+    return shutil.which(name)
 
 
 def build_object(target_name: str, output: Path) -> Path:
