@@ -126,8 +126,9 @@ def build(target_name: str, output: Path, model: Path | None, version: str, comm
         (share / "release-metadata.json").write_text(
             json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
         )
+        binary = app_bin / ("mgesture.exe" if sys.platform == "win32" else "mgesture")
         subprocess.run(
-            [str(app_bin / "mgesture"), "self-test", "--headless", "--fake-input"],
+            [str(binary), "self-test", "--headless", "--fake-input"],
             cwd=bundle,
             env={**os.environ, "MGESTURE_BUNDLE_ROOT": str(bundle)},
             check=True,
