@@ -7,13 +7,15 @@ name = "mgesture"
 dynamic = ["version"]
 description = "Local webcam hand-gesture mouse control for desktop Linux, macOS, and Windows."
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11,<3.15"
 license = { file = "LICENSE" }
 authors = [{ name = "Christian Doxa Hamasiah" }]
 dependencies = [
-  "numpy>=1.26,<2",
-  "mediapipe>=0.10.20,<0.11; platform_system != 'Darwin' or platform_machine == 'arm64'",
-  "opencv-contrib-python>=4.8,<5",
+  "numpy>=1.26,<2; python_version < '3.12'",
+  "numpy>=2,<3; python_version >= '3.12'",
+  "mediapipe>=1,<1.1; platform_system == 'Linux' and platform_machine == 'aarch64'",
+  "mediapipe>=0.10.20,<0.11; platform_system != 'Linux' or platform_machine != 'aarch64'",
+  "opencv-contrib-python>=4.8,<4.12",
   "platformdirs>=4,<5",
   "pynput>=1.7.7,<2",
 ]
