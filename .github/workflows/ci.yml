@@ -99,6 +99,13 @@ jobs:
           pixi-version: v0.77.1
           run-install: false
           cache: false
+      - name: Configure Windows ARM OpenCV build
+        if: matrix.target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          echo "CMAKE_ARGS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
+          echo "SKBUILD_CONFIGURE_OPTIONS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
+          echo "PIXI_CACHE_DIR=C:\\p" >> $env:GITHUB_ENV
       - name: Install environment
         run: pixi install --locked
       - name: Validate native runner architecture
