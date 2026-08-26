@@ -59,6 +59,19 @@ def test_stable_targets_expose_all_source_capabilities() -> None:
     assert all(isinstance(target.native_mojo_engine, bool) for target in targets.values())
 
 
+def test_mojo_source_hash_is_line_ending_independent(tmp_path: Path) -> None:
+    from mgesture.release import mojo_source_metadata
+
+    source_dir = tmp_path / "mojo"
+    source_dir.mkdir()
+    (source_dir / "mgesture_core.mojo").write_bytes(b"one\ntwo\n")
+    (source_dir / "mgesture_python.mojo").write_bytes(b"three\nfour\n")
+    unix_hash = mojo_source_metadata(source_dir)["sha256"]
+    (source_dir / "mgesture_core.mojo").write_bytes(b"one\r\ntwo\r\n")
+    (source_dir / "mgesture_python.mojo").write_bytes(b"three\r\nfour\r\n")
+    assert mojo_source_metadata(source_dir)["sha256"] == unix_hash
+
+
 def test_ci_matrix_uses_all_stable_targets_and_native_runners() -> None:
     rows = ci_matrix()
     assert len(rows) == 6

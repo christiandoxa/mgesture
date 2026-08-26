@@ -38,7 +38,7 @@ def mojo_source_metadata(source_dir: Path | None = None) -> dict[str, object]:
     for path in files:
         digest.update(path.name.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     return {
         "available": bool(files),
         "sha256": digest.hexdigest() if files else "",
