@@ -67,8 +67,9 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
     except importlib.metadata.PackageNotFoundError:
         opencv_version = "bundled-runtime-metadata"
     mojo_version = "unavailable"
-    if shutil.which("mojo"):
-        result = subprocess.run(["mojo", "--version"], capture_output=True, text=True, check=False)
+    command = shutil.which("mojo") if sys.platform != "win32" else None
+    if command:
+        result = subprocess.run([command, "--version"], capture_output=True, text=True, check=False)
         mojo_version = (result.stdout or result.stderr).strip()
     manifest = {
         "schema_version": 1,

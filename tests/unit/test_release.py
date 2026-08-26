@@ -5,10 +5,14 @@ import sys
 import tarfile
 from pathlib import Path
 
+import pytest
+
+from mgesture.release import current_target
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _release_fixture(path: Path) -> None:
+def _release_fixture(path: Path) -> Path:
     bundle = path / "bundle" / "mgesture" / "bin"
     bundle.mkdir(parents=True)
     binary = bundle / "mgesture"
@@ -17,7 +21,7 @@ def _release_fixture(path: Path) -> None:
         encoding="utf-8",
     )
     binary.chmod(0o755)
-    asset = path / "mgesture-x86_64-unknown-linux-gnu.tar.gz"
+    asset = path / f"mgesture-{current_target()}.tar.gz"
     with tarfile.open(asset, "w:gz") as archive:
         archive.add(path / "bundle" / "mgesture", arcname="mgesture")
     (path / "install.sh").write_bytes((ROOT / "install.sh").read_bytes())
@@ -41,12 +45,16 @@ def _release_fixture(path: Path) -> None:
     subprocess.run(
         [sys.executable, "scripts/release/generate_checksums.py", str(path)], cwd=ROOT, check=True
     )
+    return asset
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="the Unix installer is not available on Windows"
+)
 def test_unix_installer_stages_and_activates_without_python_runtime(tmp_path: Path):
     fixture = tmp_path / "release"
     fixture.mkdir()
-    _release_fixture(fixture)
+    asset = _release_fixture(fixture)
     home = tmp_path / "home"
     env = {
         "PATH": "/usr/bin:/bin",
@@ -69,7 +77,7 @@ def test_unix_installer_stages_and_activates_without_python_runtime(tmp_path: Pa
         == "mgesture 0.1.0"
     )
     assert (home / "app" / "current").is_symlink()
-    (fixture / "mgesture-x86_64-unknown-linux-gnu.tar.gz").write_bytes(b"corrupted")
+    asset.write_bytes(b"corrupted")
     failed_home = tmp_path / "failed-home"
     failed_env = {
         **env,
