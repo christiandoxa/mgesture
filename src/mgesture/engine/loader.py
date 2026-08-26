@@ -54,11 +54,14 @@ def _standalone_root() -> Path | None:
     configured = os.environ.get("MGESTURE_BUNDLE_ROOT")
     if configured:
         return Path(configured)
+    candidates = [Path(sys.executable).resolve().parent]
     if hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS).parent
-    executable_root = Path(sys.executable).resolve().parent.parent
-    if (executable_root / "share" / "mgesture" / "release-metadata.json").exists():
-        return executable_root
+        meipass = Path(sys._MEIPASS).resolve()
+        candidates.extend((meipass, meipass.parent, meipass.parent.parent))
+    candidates.extend((candidates[0].parent, candidates[0].parent.parent))
+    for candidate in candidates:
+        if (candidate / "share" / "mgesture" / "release-metadata.json").exists():
+            return candidate
     return None
 
 

@@ -48,6 +48,21 @@ def test_forced_mojo_self_test_rejects_non_native_engine(monkeypatch: pytest.Mon
     assert "native Mojo engine was not selected" in str(result["failures"]["gesture_engine"])
 
 
+def test_standalone_root_finds_metadata_above_pyinstaller_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import mgesture.engine.loader as loader
+
+    root = tmp_path / "mgesture"
+    (root / "share" / "mgesture").mkdir(parents=True)
+    (root / "share" / "mgesture" / "release-metadata.json").write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("MGESTURE_BUNDLE_ROOT", raising=False)
+    monkeypatch.setattr(loader.sys, "executable", str(root / "bin" / "mgesture"))
+    monkeypatch.setattr(loader.sys, "_MEIPASS", str(root / "bin" / "bin"), raising=False)
+
+    assert loader._standalone_root() == root
+
+
 def test_native_mojo_abi_loads_and_processes_landmarks() -> None:
     _require_native_library()
     engine = create_engine(
