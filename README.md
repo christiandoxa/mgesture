@@ -4,7 +4,13 @@ Local webcam hand gestures for safe desktop mouse control.
 
 ## Installation
 
-### Linux and macOS
+### Linux
+
+```sh
+curl -fsSL https://github.com/christiandoxa/mgesture/releases/latest/download/install.sh | sh
+```
+
+### macOS
 
 ```sh
 curl -fsSL https://github.com/christiandoxa/mgesture/releases/latest/download/install.sh | sh
@@ -24,9 +30,9 @@ After installing, simply run:
 mgesture
 ```
 
-That’s it. mgesture automatically selects the available camera, compute backend, gesture engine, and desktop input backend using safe defaults. It starts paused; press the configured shortcut shown at startup to activate it.
+That’s it. mgesture selects the available camera, compute backend, gesture engine, and desktop input backend using safe defaults. It starts paused; press the configured shortcut, or Space in the preview, to activate it.
 
-On the first launch, mgesture opens a short safe tutorial. It teaches pointer movement, clicking, holding, dragging, scrolling, pausing, and safe exit using simulated input before normal mouse control is enabled. Later launches go straight to normal operation.
+On the first launch, mgesture opens a short safe tutorial. It teaches pointer movement, clicking, holding, dragging, scrolling, pausing, and safe exit using simulated input before normal mouse control is enabled. Later launches skip the tutorial and start paused.
 
 ## How to use mgesture
 
@@ -44,6 +50,13 @@ Use your right hand by default. Select another physical hand with `mgesture run 
 | Pause / resume | Use the configured shortcut or the optional open-palm gesture |
 | Exit safely | Press Q/Escape in the preview or Ctrl+C in the terminal |
 
+The camera preview and pointer mapping are mirrored by default. To disable that behavior, run `mgesture config path`, open the reported TOML file, and set:
+
+```toml
+[camera]
+mirror = false
+```
+
 ## First run
 
 The first time you run `mgesture`, an interactive tutorial asks you to show the selected physical hand and practice each gesture. It uses the real camera and canonical gesture engine, but a fake input backend: tutorial practice cannot move or click the real mouse. Press `K` to skip; skipping marks onboarding complete. If you stop before completion, the tutorial runs again next time.
@@ -58,7 +71,7 @@ Replaying the tutorial does not remove calibration or settings.
 
 ## Calibration
 
-Calibration is optional. Run it once if you want to tune sensitivity for your hand, camera position, pinch distance, pointer range, or scrolling:
+Calibration is optional. Run it to tune pinch thresholds for your hand:
 
 ```sh
 mgesture calibrate
@@ -68,23 +81,39 @@ Calibration uses observation only and never emits real mouse clicks. It collects
 
 ## Reset mgesture
 
-To clear mgesture user configuration, calibration, preferences, tutorial state, recordings, and application-owned cached data under its platform directories:
+To clear mgesture user configuration, calibration and tutorial state, recordings, cached data, and logs under its platform directories:
 
 ```sh
 mgesture --reset
 ```
 
-Reset asks for confirmation and does not uninstall mgesture or remove bundled application files. For deliberate non-interactive use:
+Reset asks for confirmation by default. For deliberate non-interactive use:
 
 ```sh
 mgesture --reset --yes
 ```
 
-After reset, `mgesture` shows the first-run tutorial again. Reset is different from uninstall: reset clears user state; uninstall removes the installed application.
+After reset, `mgesture` shows the first-run tutorial again. Reset does not uninstall mgesture or remove bundled application files.
+
+## Update
+
+Check for a newer release without installing it:
+
+```sh
+mgesture update --check
+```
+
+Install the latest release for the current operating system and architecture:
+
+```sh
+mgesture update
+```
+
+Updating requires network access and keeps your configuration, calibration, and tutorial state.
 
 ## Safety
 
-mgesture starts paused, never clicks during calibration or onboarding, and releases held buttons on pause, hand loss, camera failure, exceptions, signals, and normal exit. Keep the configured keyboard shortcut available as an emergency stop. Camera frames stay local and are not saved or uploaded by default.
+mgesture starts paused by default, never clicks during calibration or onboarding, and releases held buttons on pause, hand loss, camera failure, exceptions, signals, and normal exit. Keep the configured shortcut available for pausing; use Q/Escape in the preview or Ctrl+C in the terminal to exit. Camera frames stay local and are not saved or uploaded by default.
 
 ## Linux
 

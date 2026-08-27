@@ -42,6 +42,10 @@ Hardware detection and compute policy remain centralized. Configuration is the s
 The CLI composes existing domain services. Diagnostics report actual status and never claim untested support.
 Python defines gesture semantics. Mojo mirrors those semantics and is accepted only after compile and parity checks.
 
+- Keep camera-image/preview transforms separate from handedness normalization, landmark transforms, and pointer/monitor mapping; a display mirror must not silently change gesture semantics.
+- `config.reset_user_data()` is the sole owner of user-state deletion; the CLI owns confirmation and must retain bundled runtime assets.
+- `release.py` owns release resolution and update decisions; `install.sh` and `install.ps1` own download, verification, and activation. The CLI delegates instead of duplicating updater logic.
+
 ## Reuse-first rule
 
 > Before creating a new implementation, search the repository for existing code that can be reused or extended. Do not duplicate behavior when a canonical implementation already exists.
