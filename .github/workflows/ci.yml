@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: mgesture-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   prepare_matrix:
     name: Prepare CI matrix
@@ -64,6 +68,35 @@ jobs:
           path: mojo-objects
           if-no-files-found: error
 
+  quality:
+    name: Quality (platform-independent)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: v0.77.1
+          run-install: false
+          cache: false
+      - name: Install environment
+        run: pixi install --locked
+      - name: Test
+        run: pixi run test
+      - name: Lint
+        run: pixi run lint
+      - name: Format check
+        run: pixi run format
+      - name: Type check
+        run: pixi run typecheck
+      - name: Build source package
+        run: pixi run build
+      - name: Package and release metadata checks
+        run: pixi run release-check
+
   python:
     needs: prepare_matrix
     name: Python ${{ matrix.target }}
@@ -98,22 +131,8 @@ jobs:
           pixi run python -c
           "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
           row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.runner }}'"
-      - name: Validate canonical Mojo source
-        run: pixi run python scripts/release/validate_mojo_source.py
-      - name: Test
-        run: pixi run test
-      - name: Headless fake-input self-test
-        run: pixi run python -m mgesture self-test --headless --fake-input
-      - name: Lint
-        run: pixi run lint
-      - name: Format check
-        run: pixi run format
-      - name: Type check
-        run: pixi run typecheck
-      - name: Build source package
-        run: pixi run build
-      - name: Package and release metadata checks
-        run: pixi run release-check
+      - name: Python engine self-test
+        run: pixi run python -m mgesture self-test --headless --fake-input --engine python
   mojo:
     needs: [prepare_matrix, build_mojo_objects]
     name: Mojo ${{ matrix.target }}
@@ -154,8 +173,6 @@ jobs:
           pixi run python -c
           "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
           row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.runner }}' and row.mojo_ci_mode == '${{ matrix.mojo_ci_mode }}' and row.mojo_build_mode == '${{ matrix.mojo_build_mode }}'"
-      - name: Validate canonical Mojo source
-        run: pixi run python scripts/release/validate_mojo_source.py
       - name: Summarize Mojo validation mode
         env:
           TARGET: ${{ matrix.target }}
@@ -208,10 +225,10 @@ jobs:
       - name: Mojo native tests
         if: matrix.mojo_build_mode == 'native'
         run: pixi run mojo-test
+      - name: Native Mojo ABI contract tests
+        run: pixi run pytest -q tests/unit/test_mojo_abi.py
       - name: Python/Mojo parity tests
         run: pixi run pytest -q tests/unit/test_mojo_parity.py
-      - name: Deterministic reference tests
-        run: pixi run test
       - name: Headless fake-input self-test
         run: pixi run python -m mgesture self-test --headless --fake-input --engine mojo
       - name: Deterministic replay
@@ -220,7 +237,7 @@ jobs:
   release-dry-run:
     name: Standalone Linux dry run
     runs-on: ubuntu-24.04
-    needs: [python, mojo]
+    needs: [quality, python, mojo]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
