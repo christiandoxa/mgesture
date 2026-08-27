@@ -166,7 +166,11 @@ def collect_checks(
         if sys.platform == "win32"
         else "macOS"
         if sys.platform == "darwin"
-        else os.environ.get("XDG_SESSION_TYPE", "unknown").upper()
+        else (
+            "WAYLAND"
+            if os.environ.get("WAYLAND_DISPLAY")
+            else os.environ.get("XDG_SESSION_TYPE", "unknown").upper()
+        )
     )
     mojo_version = _mojo_version()
     hardware = detect_hardware()
@@ -302,34 +306,88 @@ def collect_checks(
     if check_camera:
         checks.append(_camera_check(config.camera.index))
     if check_input:
+        backend = None
+        input_error: Exception | None = None
+        input_detail = ""
         try:
             backend = create_backend(
                 config.input.backend, config.display.width, config.display.height
             )
             layout = backend.get_screen_layout()
-            checks.append(
-                Check(
-                    "input backend",
-                    True,
-                    f"{backend.name}; virtual bounds {layout.x},{layout.y} {layout.width}x{layout.height}",
-                )
+            if not layout.monitors:
+                raise RuntimeError("input backend reported no monitors")
+            coordinate_mode = "absolute" if backend.absolute_coordinates else "relative-only"
+            input_detail = (
+                f"{backend.name}; monitors={len(layout.monitors)}; "
+                f"virtual bounds {layout.x},{layout.y} {layout.width}x{layout.height}; "
+                f"coordinates={coordinate_mode}"
             )
-            backend.close()
+            if backend.dpi_aware is not None:
+                input_detail += f"; dpi_aware={backend.dpi_aware}"
         except Exception as exc:
-            detail = str(exc)
-            remediation = "Use `--backend fake` for replay. On X11 check DISPLAY; on Wayland grant /dev/uinput or use the portal path when available."
-            checks.append(Check("input backend", False, detail, remediation))
+            input_error = exc
+        finally:
+            if backend is not None:
+                try:
+                    backend.close()
+                except Exception as exc:
+                    if input_error is None:
+                        input_error = exc
+        if input_error is None:
+            checks.append(Check("input backend", True, input_detail))
+        else:
+            if session == "X11":
+                remediation = "Check DISPLAY, xrandr, and pynput/XTest access."
+            elif session == "WAYLAND":
+                remediation = "Check /dev/uinput existence and user read/write permission."
+            elif session == "macOS":
+                remediation = "Grant Camera and Accessibility permissions to the terminal/app."
+            elif session == "Windows":
+                remediation = (
+                    "Run on native Windows with per-monitor DPI support; WSL is unsupported."
+                )
+            else:
+                remediation = (
+                    "Use `--backend fake` for replay, or select the native backend explicitly."
+                )
+            checks.append(Check("input backend", False, str(input_error), remediation))
     if session == "WAYLAND":
-        uinput = os.path.exists("/dev/uinput") and os.access("/dev/uinput", os.R_OK | os.W_OK)
+        from .input.linux_wayland_backend import uinput_status
+
+        uinput, uinput_detail = uinput_status()
         checks.append(
             Check(
                 "/dev/uinput",
                 uinput,
-                f"exists={os.path.exists('/dev/uinput')}, writable={uinput}",
+                uinput_detail,
                 "Run `scripts/setup_linux_wayland.py` and re-login; review its udev rule.",
                 required=False,
             )
         )
+    if sys.platform == "darwin":
+        try:
+            quartz = importlib.import_module("Quartz")
+            access_check = getattr(quartz, "CGPreflightPostEventAccess", None)
+            if not callable(access_check):
+                raise RuntimeError("Quartz Accessibility preflight is unavailable")
+            accessibility = bool(access_check())
+            checks.append(
+                Check(
+                    "macOS Accessibility",
+                    accessibility,
+                    "post-event access granted" if accessibility else "post-event access denied",
+                    "Grant Accessibility access to the terminal/app in System Settings.",
+                )
+            )
+        except Exception as exc:
+            checks.append(
+                Check(
+                    "macOS Accessibility",
+                    False,
+                    str(exc),
+                    "Grant Accessibility access to the terminal/app in System Settings.",
+                )
+            )
     if compute_ok:
         checks.append(
             Check(

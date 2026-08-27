@@ -19,6 +19,8 @@ class RecordedEvent:
 
 class FakeMouseBackend:
     name = "fake"
+    absolute_coordinates: bool = True
+    dpi_aware: bool | None = None
 
     def __init__(self, layout: ScreenLayout | None = None) -> None:
         self.layout = layout or ScreenLayout((Monitor("primary", 0, 0, 1920, 1080, True),))

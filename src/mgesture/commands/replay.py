@@ -50,7 +50,7 @@ def run_replay(path: Path, engine_name: str = "python") -> dict[str, object]:
     for action in release.actions:
         actions.append(action_json(action))
     dispatcher.dispatch(release)
-    dispatcher.release_all()
+    dispatcher.close()
     return {
         "engine": getattr(engine, "name", engine_name),
         "frames": len(load_fixture(path)),

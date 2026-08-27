@@ -22,6 +22,8 @@ LOGGER = logging.getLogger(__name__)
 
 def engine_config(config: AppConfig, backend: MouseBackend) -> EngineConfig:
     layout = backend.get_screen_layout()
+    if not layout.monitors:
+        raise RuntimeError(f"{backend.name} did not report any monitors")
     if config.display.screen_mode == "virtual":
         x, y, width, height = layout.x, layout.y, layout.width, layout.height
     else:
@@ -94,9 +96,9 @@ class Application:
             )
         except Exception:
             try:
-                self.dispatcher.release_all()
-            finally:
-                self.dispatcher.backend.close()
+                self.dispatcher.close()
+            except Exception:
+                LOGGER.exception("input cleanup failed after application setup error")
             raise
         performance = effective_performance(config.performance)
         self.performance = AdaptivePerformanceController(
@@ -105,15 +107,32 @@ class Application:
         self._toggle_requested = threading.Event()
         self._hotkey_listener: Any = None
         self._signals_installed = False
+        self._signal_handlers: dict[int, Any] = {}
+        self._cleaned = False
 
     def _signal(self, signum: int, _frame: Any) -> None:
         LOGGER.info("received signal %s; stopping safely", signum)
         self.stop_event.set()
 
     def _install_signals(self) -> None:
-        for signum in (signal.SIGINT, signal.SIGTERM):
-            signal.signal(signum, self._signal)
+        if self._signals_installed:
+            return
+        try:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                self._signal_handlers[signum] = signal.signal(signum, self._signal)
+        except Exception:
+            self._restore_signals()
+            raise
         self._signals_installed = True
+
+    def _restore_signals(self) -> None:
+        for signum, handler in tuple(self._signal_handlers.items()):
+            try:
+                signal.signal(signum, handler)
+            except Exception:
+                LOGGER.exception("failed to restore signal handler %s", signum)
+        self._signal_handlers.clear()
+        self._signals_installed = False
 
     def _dispatch(self, batch: Any) -> None:
         self.dispatcher.dispatch(batch)
@@ -135,29 +154,28 @@ class Application:
             LOGGER.info("global activation shortcut unavailable: %s", exc)
 
     def _cleanup(self, camera: Camera | None, landmarker: HandLandmarker | None) -> None:
+        if self._cleaned:
+            return
+        self._cleaned = True
         if self._hotkey_listener is not None:
             try:
                 self._hotkey_listener.stop()
             except Exception:
                 LOGGER.exception("global shortcut close failed")
+        try:
+            self._dispatch(self.engine.reset("application shutdown"))
+        except Exception:
+            LOGGER.exception("gesture engine reset failed during shutdown")
+        try:
+            self.dispatcher.close()
+        except Exception:
+            LOGGER.exception("mouse input cleanup failed during shutdown")
         for resource, name in ((landmarker, "landmarker"), (camera, "camera")):
             if resource is not None:
                 try:
                     resource.close()
                 except Exception:
                     LOGGER.exception("failed to close %s", name)
-        try:
-            self._dispatch(self.engine.reset("application shutdown"))
-        except Exception:
-            LOGGER.exception("gesture engine reset failed during shutdown")
-        try:
-            self.dispatcher.release_all()
-        except Exception:
-            LOGGER.exception("mouse button release failed during shutdown")
-        try:
-            self.dispatcher.backend.close()
-        except Exception:
-            LOGGER.exception("input backend close failed during shutdown")
         if self.preview:
             try:
                 import cv2 as cv2_module
@@ -165,19 +183,20 @@ class Application:
                 cv2_module.destroyAllWindows()
             except Exception:
                 LOGGER.exception("preview close failed during shutdown")
+        self._restore_signals()
 
     def run(self) -> int:
-        self._install_signals()
-        model = (
-            available_model(Path(self.config.vision.model_path))
-            if self.config.vision.model_path
-            else available_model()
-        )
-        if model is None:
-            raise RuntimeError("hand model is not installed; run `mgesture model install`")
         camera: Camera | None = None
         landmarker: HandLandmarker | None = None
         try:
+            self._install_signals()
+            model = (
+                available_model(Path(self.config.vision.model_path))
+                if self.config.vision.model_path
+                else available_model()
+            )
+            if model is None:
+                raise RuntimeError("hand model is not installed; run `mgesture model install`")
             camera = Camera(
                 self.config.camera.index,
                 self.config.camera.width,

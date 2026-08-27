@@ -172,6 +172,12 @@ def validate(config: AppConfig) -> AppConfig:
         errors.append("gesture pinch_down_threshold must be below pinch_release_threshold")
     if config.gesture.scroll_direction not in (-1, 1):
         errors.append("gesture.scroll_direction must be -1 or 1")
+    if config.display.screen_mode not in ("primary", "virtual"):
+        errors.append("display.screen_mode must be primary or virtual")
+    if config.display.monitor < 0:
+        errors.append("display.monitor must be >= 0")
+    if config.display.width <= 0 or config.display.height <= 0:
+        errors.append("display width/height must be positive")
     if config.input.engine not in ("auto", "mojo", "python"):
         errors.append("input.engine must be auto, mojo, or python")
     if config.input.backend not in ("auto", "fake", "x11", "wayland", "windows", "macos"):

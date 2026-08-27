@@ -30,11 +30,11 @@ class ScreenLayout:
 
     @property
     def right(self) -> int:
-        return max((monitor.x + monitor.width for monitor in self.monitors), default=1920)
+        return max((monitor.x + monitor.width for monitor in self.monitors), default=0)
 
     @property
     def bottom(self) -> int:
-        return max((monitor.y + monitor.height for monitor in self.monitors), default=1080)
+        return max((monitor.y + monitor.height for monitor in self.monitors), default=0)
 
     @property
     def width(self) -> int:
@@ -51,6 +51,8 @@ class ScreenLayout:
 
 class MouseBackend(Protocol):
     name: str
+    absolute_coordinates: bool
+    dpi_aware: bool | None
 
     def get_screen_layout(self) -> ScreenLayout: ...
 

@@ -31,7 +31,7 @@ def create_backend(name: str = "auto", width: int = 1920, height: int = 1080) ->
     if selected == "wayland":
         from .linux_wayland_backend import LinuxWaylandBackend
 
-        return LinuxWaylandBackend()
+        return LinuxWaylandBackend(width, height)
     if selected == "windows":
         from .windows_backend import WindowsMouseBackend
 

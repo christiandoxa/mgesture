@@ -157,6 +157,6 @@ Aplikasi mulai dalam keadaan jeda untuk mencegah klik tidak sengaja. Tekan Space
 
 ## Known limitations
 
-MediaPipe Python GPU delegate support is platform/package-specific and must initialize successfully; no GPU claim is made from hardware presence alone. Wayland uinput needs user permission and currently reports a primary 1920x1080 layout unless a platform-specific layout provider is added. Webcam and real-pointer behavior remain hardware/manual checks, not ordinary CI checks.
+MediaPipe Python GPU delegate support is platform/package-specific and must initialize successfully; no GPU claim is made from hardware presence alone. X11, macOS Quartz, and Windows use the native logical multi-monitor layout; Wayland uinput injects relative events because Wayland has no common cursor/layout query, so its configured display bounds are an estimate and the first absolute target is suppressed. Webcam and real-pointer behavior remain hardware/manual checks, not ordinary CI checks.
 
 License: Apache-2.0 for this project. MediaPipe and its model retain their upstream licenses and terms.
