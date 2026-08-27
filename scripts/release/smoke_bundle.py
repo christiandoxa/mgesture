@@ -114,7 +114,9 @@ def _isolated_environment(bundle: Path, target_os: str, temporary: Path) -> dict
 
 def smoke(archive_path: Path, target_name: str) -> None:
     release_target = target(target_name)
-    with tempfile.TemporaryDirectory(prefix="mgesture-bundle-smoke-") as temporary_name:
+    with tempfile.TemporaryDirectory(
+        prefix="mgesture-bundle-smoke-", ignore_cleanup_errors=True
+    ) as temporary_name:
         temporary = Path(temporary_name)
         extracted = temporary / "extracted"
         _extract_archive(archive_path, extracted, release_target.format)

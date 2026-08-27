@@ -277,13 +277,21 @@ def _is_descendant(path: Path, parent: Path) -> bool:
     return True
 
 
+def _is_allowed_system_alias(path: Path) -> bool:
+    if os.name == "nt":
+        return False
+    aliases = {Path("/var"): Path("/private/var"), Path("/tmp"): Path("/private/tmp")}
+    return aliases.get(path) == _resolved(path)
+
+
 def _validate_reset_target(target: ResetTarget, protected: tuple[Path, ...]) -> None:
     path = _absolute(target.path)
     if not path.parts or path == Path(path.anchor):
         raise RuntimeError(f"refusing unsafe mgesture reset path: {path}")
-    current = path
-    while current != current.parent:
-        if current.is_symlink():
+    if path.is_symlink():
+        raise RuntimeError(f"refusing unsafe symlinked mgesture reset path: {path}")
+    for current in path.parents:
+        if current.is_symlink() and not _is_allowed_system_alias(current):
             raise RuntimeError(f"refusing unsafe symlinked mgesture reset path: {path}")
         current = current.parent
     resolved = _resolved(path)
