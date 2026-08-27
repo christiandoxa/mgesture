@@ -219,6 +219,7 @@ jobs:
           bundle="$RUNNER_TEMP/mgesture-clean/mgesture"
           binary="$bundle/bin/mgesture"
           native="$bundle/runtime/mojo/libmgesture_mojo.so"
+          if [ "$RUNNER_OS" = "macOS" ]; then native="$bundle/runtime/mojo/libmgesture_mojo.dylib"; fi
           bundle_parent="$(dirname "$bundle")"
           reset_home="$RUNNER_TEMP/mgesture-reset-home"
           mkdir -p "$reset_home"
