@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-27
+
+### Fixed
+
+- Fixed Linux standalone bundles omitting the dynamically selected Pynput Xorg keyboard and mouse backends required for normal X11 input.
+- Fixed the first-run tutorial displaying the configured pause/resume shortcut without starting a listener for it.
+- Fixed pause/resume requests being collapsed or delayed behind camera-frame delivery; one shortcut activation now produces one queued toggle.
+- Fixed packaged input validation accepting a fake-input self-test without exercising the bundled platform input backends.
+
+### Safety
+
+- Kept tutorial input on the fake mouse backend while using the real configured global keyboard listener.
+- Pause transitions continue to release held mouse buttons, and platform input probes only initialize/query backends without dispatching pointer actions.
+
+### Platform
+
+- Added target-aware PyInstaller inclusion for the Pynput Xorg, Win32, and Darwin backends and their corresponding utility modules.
+- Linux standalone smoke tests now run the packaged X11 keyboard and mouse paths under an isolated Xvfb display.
+
+### Documentation
+
+- Documented the configured pause/resume shortcut and separate Linux X11, XTest, xrandr, and packaged-Pynput failure modes.
+
 ## [0.3.1] - 2026-08-27
 
 ### Fixed
