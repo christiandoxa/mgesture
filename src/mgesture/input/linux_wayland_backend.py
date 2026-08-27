@@ -48,7 +48,7 @@ class LinuxWaylandBackend:
             ) from exc
         try:
             ecodes = evdev.ecodes
-            self._ecodes = ecodes
+            self._ecodes: Any = ecodes
             self._ui: Any = evdev.UInput(
                 {
                     ecodes.EV_REL: [
@@ -66,8 +66,10 @@ class LinuxWaylandBackend:
         self._held: set[Button] = set()
         # ponytail: uinput has no portable cursor query; compositor-specific absolute input is the upgrade path.
         self._position: tuple[float, float] | None = None
-        self._layout = ScreenLayout((Monitor("configured", 0, 0, width, height, True),))
-        self._closed = False
+        self._layout: ScreenLayout = ScreenLayout(
+            (Monitor("configured", 0, 0, width, height, True),)
+        )
+        self._closed: bool = False
 
     def get_screen_layout(self) -> ScreenLayout:
         return self._layout

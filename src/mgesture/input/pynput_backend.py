@@ -102,11 +102,13 @@ class PynputMouseBackend:
             raise RuntimeError("X11 backend requires Linux")
         if not os.environ.get("DISPLAY"):
             raise RuntimeError("X11 backend requires DISPLAY")
+        self._mouse: Any = None
+        self._controller: Any = None
         try:
             from pynput import mouse  # type: ignore[import-untyped]
 
             self._mouse = mouse
-            self._controller: Any = mouse.Controller()
+            self._controller = mouse.Controller()
         except Exception as exc:
             raise RuntimeError(f"pynput X11 backend unavailable: {exc}") from exc
         self._held: set[Button] = set()
