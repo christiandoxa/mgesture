@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import re
+import ssl
 import subprocess
 import sys
 import urllib.request
@@ -95,7 +96,13 @@ def _read_url(base: str, filename: str) -> bytes:
         return (Path(base) / filename).read_bytes()
     if base.startswith("file://"):
         return (Path(base[7:]) / filename).read_bytes()
-    with urllib.request.urlopen(f"{base}/{filename}", timeout=15) as response:
+    try:
+        import certifi
+    except ImportError:
+        context = None
+    else:
+        context = ssl.create_default_context(cafile=certifi.where())
+    with urllib.request.urlopen(f"{base}/{filename}", timeout=15, context=context) as response:
         return bytes(response.read())
 
 

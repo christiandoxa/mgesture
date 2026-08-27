@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-27
+
+### Fixed
+
+- Fixed `mgesture update --check` and `mgesture update` failing TLS verification in standalone bundles by using the bundled `certifi` trust store when available.
+
+### Safety
+
+- Kept release metadata HTTPS verification, manifest validation, checksum validation, staged self-tests, and transactional activation unchanged.
+
 ## [0.3.0] - 2026-08-27
 
 ### Added
