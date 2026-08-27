@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "release"))
 
 from release_targets import STABLE_TARGETS, ci_matrix, publishable_targets  # noqa: E402
+from release_targets import target as get_target  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -196,6 +197,74 @@ def test_bundle_smoke_rejects_archive_path_escape(tmp_path: Path) -> None:
     root.mkdir()
     with pytest.raises(ValueError, match="unsafe archive member"):
         _safe_destination(root, "mgesture/../../outside")
+
+
+@pytest.mark.parametrize(
+    ("target_name", "expected"),
+    [
+        (
+            "x86_64-unknown-linux-gnu",
+            ("pynput.keyboard._xorg", "pynput.mouse._xorg"),
+        ),
+        (
+            "aarch64-apple-darwin",
+            ("pynput.keyboard._darwin", "pynput.mouse._darwin"),
+        ),
+        (
+            "x86_64-pc-windows-msvc",
+            ("pynput.keyboard._win32", "pynput.mouse._win32"),
+        ),
+    ],
+)
+def test_bundle_uses_target_pynput_backends(target_name: str, expected: tuple[str, str]) -> None:
+    import build_bundle
+
+    assert build_bundle.pynput_hidden_imports(get_target(target_name).os) == expected
+
+
+def test_bundle_pynput_hook_is_narrow(tmp_path: Path) -> None:
+    import build_bundle
+
+    hook = build_bundle._write_pynput_hook(tmp_path, "linux") / "hook-pynput.py"
+    contents = hook.read_text(encoding="utf-8")
+
+    assert "pynput.keyboard._xorg" in contents
+    assert "pynput.mouse._xorg" in contents
+    assert "collect_submodules" not in contents
+
+
+@pytest.mark.parametrize(
+    ("modules", "message"),
+    [
+        (
+            {"pynput.keyboard._xorg", "pynput.mouse._darwin"},
+            "missing dynamic pynput backend",
+        ),
+        (
+            {
+                "pynput.keyboard._xorg",
+                "pynput.mouse._xorg",
+                "pynput.keyboard._win32",
+            },
+            "foreign pynput backend",
+        ),
+    ],
+)
+def test_bundle_smoke_validates_pynput_backends(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, modules: set[str], message: str
+) -> None:
+    import smoke_bundle
+
+    binary = tmp_path / "mgesture"
+    binary.write_bytes(b"fixture")
+    monkeypatch.setattr(
+        smoke_bundle,
+        "_packaged_python_modules",
+        lambda _binary: modules,
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        smoke_bundle._validate_pynput_bundle(binary, "linux")
 
 
 def test_windows_tool_lookup_matches_target_architecture(monkeypatch: pytest.MonkeyPatch) -> None:

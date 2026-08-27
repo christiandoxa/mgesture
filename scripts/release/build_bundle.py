@@ -30,6 +30,30 @@ from mgesture.engine.mojo_engine import MOJO_ABI_VERSION, native_library_name  #
 from mgesture.release import mojo_source_metadata, mojo_source_paths  # noqa: E402
 from mgesture.vision.model_manager import available_model  # noqa: E402
 
+_PYNPUT_BACKENDS = {
+    "linux": "xorg",
+    "macos": "darwin",
+    "windows": "win32",
+}
+
+
+def pynput_hidden_imports(target_os: str) -> tuple[str, str]:
+    try:
+        backend = _PYNPUT_BACKENDS[target_os]
+    except KeyError as exc:
+        raise ValueError(f"unsupported pynput target OS: {target_os}") from exc
+    return (f"pynput.keyboard._{backend}", f"pynput.mouse._{backend}")
+
+
+def _write_pynput_hook(work: Path, target_os: str) -> Path:
+    hook_dir = work / "pyinstaller-hooks"
+    hook_dir.mkdir()
+    # hooks-contrib collects every backend; this user hook has higher priority.
+    (hook_dir / "hook-pynput.py").write_text(
+        f"hiddenimports = {list(pynput_hidden_imports(target_os))!r}\n", encoding="utf-8"
+    )
+    return hook_dir
+
 
 def _version() -> str:
     namespace: dict[str, object] = {}
@@ -100,6 +124,7 @@ def build(
     with tempfile.TemporaryDirectory(prefix="mgesture-build-") as temporary:
         work = Path(temporary)
         dist = work / "dist"
+        pynput_hook_dir = _write_pynput_hook(work, release_target.os)
         command = [
             sys.executable,
             "-m",
@@ -117,6 +142,8 @@ def build(
             "cv2",
             "--copy-metadata",
             "mediapipe",
+            "--additional-hooks-dir",
+            str(pynput_hook_dir),
             "--distpath",
             str(dist),
             "--workpath",

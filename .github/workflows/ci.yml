@@ -212,6 +212,20 @@ jobs:
           MODE: ${{ matrix.mojo_ci_mode }}
         run: |
           pixi run python -c "import os; from pathlib import Path; n=chr(10); mode=os.environ['MODE']; Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('## Mojo validation'+n+n+'- Target: '+os.environ['TARGET']+n+'- Mojo source: available'+n+'- Validation mode: '+mode+n+'- Native Mojo runtime: '+('available' if mode == 'native' else 'unavailable')+n+'- Python fallback: available'+n)"
+      - name: Start Xvfb for Linux input smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb x11-utils x11-xserver-utils
+          Xvfb :99 -screen 0 1280x720x24 -nolisten tcp > "$RUNNER_TEMP/mgesture-xvfb.log" 2>&1 &
+          for attempt in 1 2 3 4 5; do
+            DISPLAY=:99 xdpyinfo >/dev/null 2>&1 && break
+            sleep 1
+          done
+          DISPLAY=:99 xdpyinfo >/dev/null
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          echo "XDG_SESSION_TYPE=x11" >> "$GITHUB_ENV"
       - name: Build native Mojo library (Linux)
         if: matrix.mojo_build_mode == 'native' && runner.os == 'Linux'
         run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --output build/libmgesture_mojo.so
@@ -322,6 +336,19 @@ jobs:
           cache: true
           cache-key: mgesture-pixi-0.77.1-x86_64-unknown-linux-gnu-standard-${{ hashFiles('pixi.toml', 'pyproject.toml') }}-
           cache-write: ${{ github.ref == 'refs/heads/main' }}
+      - name: Start Xvfb for Linux input smoke
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb x11-utils x11-xserver-utils
+          Xvfb :99 -screen 0 1280x720x24 -nolisten tcp > "$RUNNER_TEMP/mgesture-xvfb.log" 2>&1 &
+          for attempt in 1 2 3 4 5; do
+            DISPLAY=:99 xdpyinfo >/dev/null 2>&1 && break
+            sleep 1
+          done
+          DISPLAY=:99 xdpyinfo >/dev/null
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          echo "XDG_SESSION_TYPE=x11" >> "$GITHUB_ENV"
       - name: Download exact main candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

@@ -16,12 +16,77 @@ ROOT = Path(__file__).resolve().parents[2]
 
 sys.path.insert(0, str(ROOT / "scripts" / "release"))
 
+from build_bundle import pynput_hidden_imports  # noqa: E402
 from release_targets import target  # noqa: E402
 from validate_architecture import validate_bundle as validate_bundle_architecture  # noqa: E402
 from validate_mojo_source import validate_bundle as validate_mojo_bundle  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
 from mgesture.engine.mojo_engine import native_library_name  # noqa: E402
+
+
+def _packaged_python_modules(binary: Path) -> set[str]:
+    try:
+        from PyInstaller.archive.readers import CArchiveReader
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyInstaller is required to inspect the packaged Python archive"
+        ) from exc
+    archive = CArchiveReader(str(binary))
+    return set(archive.open_embedded_archive("PYZ.pyz").toc)
+
+
+def _validate_pynput_bundle(binary: Path, target_os: str) -> None:
+    expected = set(pynput_hidden_imports(target_os))
+    modules = _packaged_python_modules(binary)
+    missing = expected - modules
+    if missing:
+        raise RuntimeError(
+            "bundle is missing dynamic pynput backend(s): " + ", ".join(sorted(missing))
+        )
+    foreign = {
+        name
+        for name in modules
+        if name.startswith(("pynput.keyboard._", "pynput.mouse._"))
+        and name not in expected
+        and not name.endswith("._base")
+    }
+    if foreign:
+        raise RuntimeError(
+            "bundle contains foreign pynput backend(s): " + ", ".join(sorted(foreign))
+        )
+
+
+def _validate_runtime_input(binary: Path, root: Path, environment: dict[str, str]) -> None:
+    result = subprocess.run(
+        [str(binary), "doctor", "--json"],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        report = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"packaged input smoke did not return JSON: {detail}") from exc
+    checks = report.get("checks", []) if isinstance(report, dict) else []
+    input_check = next(
+        (
+            check
+            for check in checks
+            if isinstance(check, dict) and check.get("name") == "input backend"
+        ),
+        None,
+    )
+    if not isinstance(input_check, dict) or input_check.get("ok") is not True:
+        detail = (
+            input_check.get("detail", "missing input backend check")
+            if input_check
+            else "missing input backend check"
+        )
+        raise RuntimeError(f"packaged input backend smoke failed: {detail}")
 
 
 def _safe_destination(root: Path, member_name: str) -> Path:
@@ -109,6 +174,9 @@ def _isolated_environment(bundle: Path, target_os: str, temporary: Path) -> dict
         environment["XDG_DATA_HOME"] = str(
             bundle.parent if target_os == "linux" else temporary / "data"
         )
+        if target_os == "linux":
+            environment.pop("WAYLAND_DISPLAY", None)
+            environment["XDG_SESSION_TYPE"] = "x11"
     return environment
 
 
@@ -137,6 +205,8 @@ def smoke(archive_path: Path, target_name: str) -> None:
                 raise ValueError(f"bundle is missing required file: {path}")
 
         environment = _isolated_environment(bundle, release_target.os, temporary)
+        _validate_pynput_bundle(binary, release_target.os)
+        _validate_runtime_input(binary, bundle, environment)
         version_output = _run(binary, ["--version"], bundle, environment)
         if str(metadata.get("version", "")) not in version_output:
             raise RuntimeError("packaged version output does not match metadata")
