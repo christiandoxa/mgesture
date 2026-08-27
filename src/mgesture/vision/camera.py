@@ -171,6 +171,18 @@ def probe_cameras(
     return tuple(probe_camera(index, width, height, target_fps) for index in range(limit))
 
 
+def select_camera_index(
+    preferred: int, width: int = 640, height: int = 480, target_fps: int = 30, limit: int = 8
+) -> int | None:
+    """Prefer configured camera, then choose the first readable camera deterministically."""
+    candidates = (preferred, *(index for index in range(limit) if index != preferred))
+    for index in candidates:
+        info = probe_camera(index, width, height, target_fps)
+        if info.opened and info.readable:
+            return index
+    return None
+
+
 class Camera:
     _READ_FAILURE_LIMIT = 3
     _RECONNECT_INITIAL_DELAY = 0.1

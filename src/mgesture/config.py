@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
+import shutil
+import tempfile
 import tomllib
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
-from platformdirs import user_config_dir
+from platformdirs import user_cache_dir, user_config_dir, user_data_dir, user_log_dir
+
+STATE_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +108,100 @@ class AppConfig:
 
 def config_path() -> Path:
     return Path(user_config_dir("mgesture")) / "config.toml"
+
+
+def data_dir() -> Path:
+    return Path(user_data_dir("mgesture"))
+
+
+def cache_dir() -> Path:
+    return Path(user_cache_dir("mgesture"))
+
+
+def state_path() -> Path:
+    return data_dir() / "state.json"
+
+
+def log_dir() -> Path:
+    candidate = Path(user_log_dir("mgesture"))
+    return candidate if candidate.name.casefold() == "mgesture" else candidate.parent
+
+
+def onboarding_completed() -> bool:
+    try:
+        raw = json.loads(state_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    onboarding = raw.get("onboarding") if isinstance(raw, dict) else None
+    return (
+        isinstance(raw, dict)
+        and raw.get("schema_version") == STATE_SCHEMA_VERSION
+        and isinstance(onboarding, dict)
+        and onboarding.get("completed") is True
+    )
+
+
+def set_onboarding_completed(completed: bool = True) -> Path:
+    target = state_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix="state.", suffix=".tmp", dir=target.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "schema_version": STATE_SCHEMA_VERSION,
+                    "onboarding": {"completed": completed},
+                },
+                handle,
+                indent=2,
+            )
+            handle.write("\n")
+        os.chmod(temporary, 0o600)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
+def _safe_owned_directory(path: Path) -> Path:
+    """Accept only mgesture's app directory or its platform log/cache child."""
+    path = path.expanduser()
+    app_name = path.name.casefold()
+    valid_child = app_name in {"cache", "logs", "log"} and path.parent.name.casefold() == "mgesture"
+    if (
+        app_name != "mgesture"
+        and not valid_child
+        or path.parent == path
+        or path.is_symlink()
+        or path.parent.is_symlink()
+    ):
+        raise RuntimeError(f"refusing unsafe mgesture data path: {path}")
+    return path
+
+
+def reset_user_data() -> tuple[str, ...]:
+    """Remove mgesture user state while retaining installed application assets."""
+    removed: list[str] = []
+    targets = (
+        (config_path().parent, "configuration"),
+        (data_dir(), "user data, calibration, tutorial state, and recordings"),
+        (cache_dir(), "cached application data"),
+        (log_dir(), "application logs"),
+    )
+    paths: list[tuple[Path, str]] = []
+    seen: set[Path] = set()
+    for raw_path, label in targets:
+        path = _safe_owned_directory(raw_path)
+        if path in seen:
+            continue
+        seen.add(path)
+        paths.append((path, label))
+    for path, label in paths:
+        if path.exists():
+            shutil.rmtree(path)
+            removed.append(label)
+    return tuple(removed)
 
 
 def default_config() -> AppConfig:

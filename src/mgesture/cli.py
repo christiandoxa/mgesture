@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 
 from . import __version__
@@ -12,9 +13,18 @@ from .commands.calibrate import calibrate
 from .commands.list_cameras import list_cameras
 from .commands.record_landmarks import record_landmarks
 from .commands.replay import run_replay
-from .config import config_path, config_text, load_config, with_overrides, write_config
+from .config import (
+    config_path,
+    config_text,
+    load_config,
+    onboarding_completed,
+    reset_user_data,
+    with_overrides,
+    write_config,
+)
 from .diagnostics import DoctorCode, collect_checks, print_report
 from .logging_config import configure_logging
+from .onboarding import run_tutorial
 from .release import run_update
 from .self_test import run_self_test
 from .vision.model_manager import install_model
@@ -22,13 +32,20 @@ from .vision.model_manager import install_model
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mgesture", description="Safe local webcam hand-gesture mouse control"
+        prog="mgesture",
+        description="Safe local webcam hand-gesture mouse control. Run `mgesture` to start.",
+        epilog=(
+            "Typical use: mgesture starts the app; mgesture tutorial replays the safe tutorial; "
+            "mgesture calibrate is optional; mgesture doctor diagnoses problems."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"mgesture {__version__}")
+    parser.add_argument("--reset", action="store_true", help="reset all mgesture user data")
+    parser.add_argument("--yes", action="store_true", help="confirm a destructive reset")
     parser.add_argument("--engine", dest="global_engine", choices=("auto", "mojo", "python"))
     subparsers = parser.add_subparsers(dest="command")
 
-    run = subparsers.add_parser("run", help="run webcam gesture control; starts paused")
+    run = subparsers.add_parser("run", help="start webcam gesture control; starts paused")
     run.add_argument("--camera", type=int)
     run.add_argument("--engine", choices=("auto", "mojo", "python"))
     run.add_argument("--compute", choices=("auto", "gpu", "cpu"))
@@ -55,6 +72,7 @@ def _parser() -> argparse.ArgumentParser:
     calibrate_parser = subparsers.add_parser("calibrate", help="safe camera calibration wizard")
     calibrate_parser.add_argument("--output", type=Path)
     calibrate_parser.add_argument("--samples", type=int, default=20)
+    subparsers.add_parser("tutorial", help="replay the safe interactive gesture tutorial")
     record = subparsers.add_parser(
         "record-landmarks", help="developer-only timestamped local landmark JSONL recording"
     )
@@ -96,10 +114,78 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _reset_command(yes: bool) -> int:
+    if not yes:
+        if not sys.stdin.isatty():
+            print(
+                "mgesture --reset needs an interactive confirmation; use --reset --yes",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "This deletes mgesture configuration, calibration, tutorial state, recordings, "
+            "and application logs. The installed application and bundled model are kept."
+        )
+        try:
+            answer = input("Continue? [y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().casefold() not in ("y", "yes"):
+            print("mgesture reset cancelled.")
+            return 0
+    try:
+        removed = reset_user_data()
+    except (OSError, RuntimeError) as exc:
+        print(f"mgesture reset: {exc}", file=sys.stderr)
+        return 1
+    print("mgesture has been reset.")
+    if removed:
+        print("Removed: " + ", ".join(removed) + ".")
+    print("Start again with: mgesture")
+    return 0
+
+
+def _run_application(args: argparse.Namespace) -> int:
+    try:
+        config = load_config(args.config)
+        config = with_overrides(
+            config,
+            index=args.camera,
+            engine=args.engine,
+            backend=args.backend,
+            preview=args.preview,
+            armed=args.armed or None,
+            log_level=args.log_level,
+            mode=args.compute,
+            profile=args.profile,
+            monitor=args.monitor,
+        )
+        configure_logging(config.log_level)
+        if not onboarding_completed():
+            tutorial_status = run_tutorial(config)
+            if tutorial_status:
+                return tutorial_status
+        armed_override = True if args.armed else None
+        return Application(config, args.engine, args.backend, args.preview, armed_override).run()
+    except KeyboardInterrupt:
+        logging.getLogger(__name__).info("stopped")
+        return 0
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"mgesture: {exc}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> None:
-    args = _parser().parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = _parser().parse_args(raw_argv)
+    if args.reset:
+        if args.command is not None:
+            raise SystemExit("mgesture --reset must be used without a subcommand")
+        raise SystemExit(_reset_command(args.yes))
+    if args.yes:
+        raise SystemExit("mgesture --yes is only valid with --reset")
     if args.command is None:
-        return main(["run"] if argv is None else ["run", *argv])
+        args = _parser().parse_args(["run", *raw_argv])
     if args.command == "config":
         if args.config_command == "path":
             print(config_path())
@@ -132,6 +218,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(0 if args.runtime and code == DoctorCode.OPTIONAL_ACCELERATION else code)
     if args.command == "calibrate":
         raise SystemExit(calibrate(load_config(), args.output, args.samples))
+    if args.command == "tutorial":
+        raise SystemExit(run_tutorial(load_config()))
     if args.command == "record-landmarks":
         if not args.developer:
             raise SystemExit("record-landmarks is developer-only; pass --developer explicitly")
@@ -153,26 +241,6 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "update":
         raise SystemExit(run_update(args.check))
     if args.command == "run":
-        engine = args.engine or args.global_engine
-        config = load_config(args.config)
-        config = with_overrides(
-            config,
-            index=args.camera,
-            engine=engine,
-            backend=args.backend,
-            preview=args.preview,
-            armed=args.armed or None,
-            log_level=args.log_level,
-            mode=args.compute,
-            profile=args.profile,
-            monitor=args.monitor,
-        )
-        configure_logging(config.log_level)
-        try:
-            armed_override = True if args.armed else None
-            raise SystemExit(
-                Application(config, engine, args.backend, args.preview, armed_override).run()
-            )
-        except KeyboardInterrupt:
-            logging.getLogger(__name__).info("stopped")
-        return
+        if args.global_engine and args.engine is None:
+            args.engine = args.global_engine
+        raise SystemExit(_run_application(args))

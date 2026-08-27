@@ -1,4 +1,12 @@
-from .camera import Camera, CameraError, CameraInfo, CapturedFrame, probe_camera, probe_cameras
+from .camera import (
+    Camera,
+    CameraError,
+    CameraInfo,
+    CapturedFrame,
+    probe_camera,
+    probe_cameras,
+    select_camera_index,
+)
 from .hand_landmarker import HandLandmarker, HandLandmarkerError
 from .landmarks import DetectedHand, LandmarkResult
 from .model_manager import (
@@ -16,6 +24,7 @@ __all__ = [
     "CapturedFrame",
     "probe_camera",
     "probe_cameras",
+    "select_camera_index",
     "DetectedHand",
     "LandmarkResult",
     "available_model",

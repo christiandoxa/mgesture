@@ -13,7 +13,8 @@ from .compute import ComputePlan, detect_hardware, select_compute_plan
 from .config import AppConfig
 from .engine import EngineConfig, LandmarkFrame, create_engine
 from .input import InputDispatcher, MouseBackend, create_backend
-from .vision import Camera, HandLandmarker, available_model
+from .version import __version__
+from .vision import Camera, HandLandmarker, available_model, select_camera_index
 from .vision.overlay import draw_overlay
 from .vision.scheduler import AdaptivePerformanceController, effective_performance
 
@@ -203,8 +204,18 @@ class Application:
             )
             if model is None:
                 raise RuntimeError("hand model is not installed; run `mgesture model install`")
-            camera = Camera(
+            camera_index = select_camera_index(
                 self.config.camera.index,
+                self.config.camera.width,
+                self.config.camera.height,
+                self.config.camera.target_fps,
+            )
+            if camera_index is None:
+                raise RuntimeError(
+                    "no usable camera found; run `mgesture list-cameras` or `mgesture doctor`"
+                )
+            camera = Camera(
+                camera_index,
                 self.config.camera.width,
                 self.config.camera.height,
                 self.config.camera.target_fps,
@@ -243,7 +254,7 @@ class Application:
                     cv2 = cv2_module
                 except ImportError as exc:
                     raise RuntimeError("preview requested but OpenCV is unavailable") from exc
-            LOGGER.info(
+            LOGGER.debug(
                 "compute=%s inference=%s preprocessing=%s gesture=%s preview=%s",
                 self.compute_request,
                 self.compute_plan.inference,
@@ -252,14 +263,15 @@ class Application:
                 self.compute_plan.preview,
             )
             LOGGER.info(
-                "engine=%s backend=%s armed=%s camera=%sx%s@%s (%s)",
-                getattr(self.engine, "name", "unknown"),
-                self.backend.name,
-                getattr(self.engine, "armed", False),
+                "mgesture %s | camera %s (%sx%s@%.1f) | engine %s | compute %s | status Paused | press %s to activate; Ctrl+C exits safely",
+                __version__,
+                camera.index,
                 camera.actual_width,
                 camera.actual_height,
                 camera.actual_fps,
-                camera.backend,
+                getattr(self.engine, "name", "unknown"),
+                self.compute_plan.inference.removeprefix("mediapipe_").upper(),
+                self.config.activation_shortcut,
             )
             self._start_hotkey()
             hand_tracked = False

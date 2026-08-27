@@ -8,4 +8,6 @@ Camera startup applies requested width, height, and FPS, then reports negotiated
 
 `calibrate --output PATH --samples N` collects robust open-hand and pinch observations, then updates existing pinch thresholds only after enough valid right-hand samples. Calibration never creates an input backend. No configuration migration is needed; omitted fields retain defaults.
 
+Normal startup is `mgesture`; `mgesture run` remains an explicit alias. On first launch, a completed flag is stored in the platform user-data directory and the safe tutorial runs before real input. `mgesture tutorial` replays it without changing settings. `mgesture --reset` removes mgesture user configuration, state, cache, logs, and recordings under the platform directories after confirmation; it keeps installed application files and bundled assets.
+
 The configuration validator rejects invalid thresholds, margins, confidence values, backends, engine/compute selectors, and FPS relationships before runtime.
