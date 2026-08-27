@@ -96,8 +96,10 @@ try {
     try { Move-Item -LiteralPath $StagedRelease -Destination $Current } catch { if (Test-Path -LiteralPath $Backup) { Move-Item -LiteralPath $Backup -Destination $Current }; throw }
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($env:MGESTURE_NO_PATH_UPDATE -notmatch "^(?i:1|true|yes)$" -and -not (($UserPath -split ';') -contains $Bin)) { [Environment]::SetEnvironmentVariable("Path", (($UserPath.TrimEnd(';') + ';' + $Bin).Trim(';')), "User") }
-    Write-Host "mgesture $Version installed at $Current"
-    Write-Host "Open a new PowerShell, then run: mgesture doctor; mgesture calibrate; mgesture"
+    Write-Host "mgesture $Version installed successfully."
+    Write-Host "Open a new PowerShell, then start it with: mgesture"
+    Write-Host "The first launch includes a safe interactive tutorial."
+    Write-Host "Optional calibration: mgesture calibrate"
 } finally {
     if (Test-Path -LiteralPath $Temp) { Remove-Item -LiteralPath $Temp -Recurse -Force }
 }

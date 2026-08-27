@@ -110,6 +110,10 @@ current_tmp="$app_root/.current.$$"
 ln -s "$staged_release" "$current_tmp"
 mv -f "$current_tmp" "$app_root/current"
 stage=
-echo "mgesture $installed_version installed at $app_root/current"
+echo "mgesture $installed_version installed successfully."
 case ":${PATH:-}:" in *":$bin_dir:"*) ;; *) echo "Current shell: export PATH=\"$bin_dir:\$PATH\"";; esac
-echo 'Next: mgesture doctor; mgesture calibrate; mgesture'
+echo
+echo 'Start mgesture with:'
+echo '    mgesture'
+echo 'The first launch includes a safe interactive tutorial.'
+echo 'Optional calibration: mgesture calibrate'

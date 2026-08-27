@@ -9,6 +9,8 @@ from pathlib import Path
 
 from platformdirs import user_cache_dir
 
+from ..version import __version__
+
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 # SHA-256 of the versioned official model at MODEL_URL.
 MODEL_SHA256 = "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
@@ -72,7 +74,7 @@ def install_model(destination: Path | None = None, url: str = MODEL_URL) -> Path
     os.close(fd)
     temporary = Path(temporary_name)
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "mgesture/0.1"})
+        request = urllib.request.Request(url, headers={"User-Agent": f"mgesture/{__version__}"})
         with (
             urllib.request.urlopen(request, timeout=60) as response,
             temporary.open("wb") as output,

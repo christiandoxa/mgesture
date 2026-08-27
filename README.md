@@ -2,8 +2,6 @@
 
 Local webcam hand gestures for safe desktop mouse control.
 
-mgesture keeps camera frames on the machine, starts paused, and converts one right-hand landmark stream into typed mouse actions. The Python engine is the reference behavior, the canonical Mojo source is maintained for all six release targets, and every standalone bundle includes a verified native Mojo engine with the Python fallback. Compute selection is independent: `--compute auto|gpu|cpu` controls vision inference, while `--engine auto|mojo|python` controls gesture processing.
-
 ## Installation
 
 ### Linux and macOS
@@ -18,18 +16,87 @@ curl -fsSL https://github.com/christiandoxa/mgesture/releases/latest/download/in
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/christiandoxa/mgesture/releases/latest/download/install.ps1 | iex"
 ```
 
-Then run:
+## Quick start
+
+After installing, simply run:
 
 ```sh
-mgesture --version
-mgesture doctor
-mgesture calibrate
 mgesture
 ```
 
-Release installers verify the checksum-covered release manifest and staged archive before activation. They install a self-contained runtime; Python, Pixi, and Mojo are not required. The latest-release installer source is also auditable at `https://raw.githubusercontent.com/christiandoxa/mgesture/main/install.sh` and `https://raw.githubusercontent.com/christiandoxa/mgesture/main/install.ps1`; release URLs are recommended for stable installation.
+That’s it. mgesture automatically selects the available camera, compute backend, gesture engine, and desktop input backend using safe defaults. It starts paused; press the configured shortcut shown at startup to activate it.
 
-Standalone target availability is reported in [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md). Unsupported target dependencies fail explicitly instead of selecting a misleading archive.
+On the first launch, mgesture opens a short safe tutorial. It teaches pointer movement, clicking, holding, dragging, scrolling, pausing, and safe exit using simulated input before normal mouse control is enabled. Later launches go straight to normal operation.
+
+## How to use mgesture
+
+Use your right hand. The preview shows the active camera region and current state.
+
+| Mouse action | Hand gesture |
+|---|---|
+| Move cursor | Move your right index finger |
+| Left click | Pinch thumb and index finger, then release |
+| Hold | Keep thumb and index finger pinched |
+| Drag and drop | Keep the left pinch held while moving |
+| Right click | Pinch thumb and middle finger, then release |
+| Right hold | Keep thumb and middle finger pinched |
+| Scroll | Extend index and middle fingers, fold ring and pinky, then move vertically |
+| Pause / resume | Use the configured shortcut or the optional open-palm gesture |
+| Exit safely | Press Q/Escape in the preview or Ctrl+C in the terminal |
+
+## First run
+
+The first time you run `mgesture`, an interactive tutorial asks you to show your right hand and practice each gesture. It uses the real camera and canonical gesture engine, but a fake input backend: tutorial practice cannot move or click the real mouse. Press `K` to skip; skipping marks onboarding complete. If you stop before completion, the tutorial runs again next time.
+
+Want to practice again?
+
+```sh
+mgesture tutorial
+```
+
+Replaying the tutorial does not remove calibration or settings.
+
+## Calibration
+
+Calibration is optional. Run it once if you want to tune sensitivity for your hand, camera position, pinch distance, pointer range, or scrolling:
+
+```sh
+mgesture calibrate
+```
+
+Calibration uses observation only and never emits real mouse clicks. It collects multiple samples and saves only after enough valid observations.
+
+## Reset mgesture
+
+To clear mgesture user configuration, calibration, preferences, tutorial state, recordings, and application-owned cached data under its platform directories:
+
+```sh
+mgesture --reset
+```
+
+Reset asks for confirmation and does not uninstall mgesture or remove bundled application files. For deliberate non-interactive use:
+
+```sh
+mgesture --reset --yes
+```
+
+After reset, `mgesture` shows the first-run tutorial again. Reset is different from uninstall: reset clears user state; uninstall removes the installed application.
+
+## Safety
+
+mgesture starts paused, never clicks during calibration or onboarding, and releases held buttons on pause, hand loss, camera failure, exceptions, signals, and normal exit. Keep the configured keyboard shortcut available as an emergency stop. Camera frames stay local and are not saved or uploaded by default.
+
+## Linux
+
+Linux X11 uses the native XTest/pynput path and discovers the X11 monitor layout through `xrandr`. Linux Wayland uses `/dev/uinput` for relative pointer events; grant the required device permission as described in [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md). The application reports actionable permission and camera errors.
+
+## macOS
+
+Grant Camera and Accessibility permission to the terminal or application. Quartz coordinates use logical display points, including negative coordinates for a monitor positioned left of the primary display.
+
+## Windows
+
+The standalone package is native for x86_64 and ARM64 Windows. It uses `SendInput`, enables per-monitor DPI awareness, and maps the Windows virtual desktop, including negative monitor coordinates. WSL is not supported.
 
 ## Standalone platforms
 
@@ -42,90 +109,44 @@ Standalone target availability is reported in [docs/PLATFORM_SUPPORT.md](docs/PL
 | Windows | x86_64 | Yes | Yes (MediaPipe 0.10.35) | Yes | Yes |
 | Windows | ARM64 | Yes | Yes (MediaPipe 0.10.35) | Yes | Yes |
 
-The six rows are built and smoke-tested on matching native GitHub runners for each stable release. Every standalone bundle includes the same canonical `.mojo` source, a target-native Mojo ABI library, and the Python reference engine with CPU fallback.
+All six standalone targets include the same canonical Mojo source, a native Mojo engine, and the Python fallback. Camera, Accessibility, and real-pointer behavior still need manual hardware validation.
 
-| Platform | Architecture | Native Mojo engine in standalone bundle |
-|---|---|---:|
-| Linux | x86_64 | Yes |
-| Linux | ARM64 | Yes |
-| macOS | Intel x86_64 | Yes |
-| macOS | Apple Silicon ARM64 | Yes |
-| Windows | x86_64 | Yes |
-| Windows | ARM64 | Yes |
+## Troubleshooting
 
-The canonical Mojo source is compiled into target-native machine code, linked into the bundled ABI library, and parity-tested on all six matching native runners. `--engine auto` selects the bundled Mojo engine when its ABI and architecture checks pass; the Python engine remains available as an explicit fallback. Camera, Accessibility, and real-pointer behavior still require manual hardware validation.
+If startup cannot access a camera, input backend, compute option, or operating-system permission, run:
 
-CI presents both Python and Mojo validation for all six targets. Mojo jobs build, link, inspect, load, and exercise a target-native library from the canonical source; no target is removed from the Mojo matrix.
-
-## Status
-
-The current version contains a runnable CLI, deterministic Python engine, fake-backend replay, explicit model management, bounded camera/MediaPipe pipeline, Linux X11/Wayland-uinput/Windows/macOS adapters, centralized compute planning, and stable-Mojo build scaffolding. Hardware and cross-platform claims below are intentionally conservative; run `mgesture doctor` on the target machine.
-
-## Linux quick start
-
-```bash
-curl -fsSL https://pixi.sh/install.sh | bash
-export PATH="$HOME/.pixi/bin:$PATH"
-cd /path/to/mgesture
-pixi install
-pixi run python -m mgesture model install
-pixi run python -m mgesture doctor
-pixi run python -m mgesture run --engine python --compute auto
-```
-
-The application opens paused. Use the preview Space key to arm/pause; `Q` or Escape is an emergency stop. Start with `--backend fake` only for development/replay. X11 requires a working `DISPLAY`. Wayland requires the narrowly scoped uinput setup described in `docs/PLATFORM_SUPPORT.md`.
-
-## Commands
-
-```bash
-mgesture --help
-mgesture doctor [--json]
-mgesture doctor --runtime --json
+```sh
+mgesture doctor
 mgesture list-cameras
-mgesture model install
-mgesture calibrate
+```
+
+For local developer fixtures, use the explicit opt-in landmark recorder:
+
+```sh
 mgesture record-landmarks --developer --output ./recordings/hand.jsonl
-mgesture replay --fixture tests/fixtures/basic.json
-mgesture run --engine auto --compute auto --profile balanced
+```
+
+It writes timestamped landmarks only, never camera images, and never sends data anywhere. Landmark recordings can still reveal behavioral information and should be treated as user data.
+
+## Advanced usage
+
+The explicit `run` form remains available for scripts and power users:
+
+```sh
+mgesture run --compute cpu
+mgesture run --compute gpu
+mgesture run --engine python
+mgesture run --engine mojo
+mgesture list-cameras
+mgesture doctor --json
 mgesture benchmark --engine compare --compute cpu
-mgesture benchmark --compare-compute
-mgesture self-test --headless --fake-input
-mgesture update --check
-mgesture update
-mgesture config show
-mgesture config path
 ```
 
-`MGESTURE_ENGINE=auto|mojo|python` and `MGESTURE_COMPUTE=auto|gpu|cpu` are equivalent environment controls. `auto` may fall back; explicit `mojo` and `gpu` fail with an actionable error when unavailable.
-
-## Gesture reference
-
-- Index fingertip controls the pointer inside a configurable active camera region.
-- Thumb-index pinch presses and holds the left button; release produces the corresponding up event, so drag-and-drop is natural.
-- Thumb-middle pinch presses and holds the right button.
-- Index and middle extended with ring and pinky folded enters vertical scroll after a stability delay; pointer movement is locked while scrolling.
-- Low-confidence/left-hand input is ignored. Hand loss, pause, errors, signals, camera failure, and exit release every held button.
-
-See [docs/GESTURES.md](docs/GESTURES.md) for thresholds, precedence, and replay cases.
-
-## Compute architecture
-
-Acceleration is reported by layer rather than as a blanket claim:
-
-```text
-camera capture       CPU / V4L2 or platform camera
-preprocessing        CPU color conversion
-hand inference       MediaPipe CPU or successfully initialized GPU delegate
-gesture processing   Python CPU or persistent Mojo CPU
-preview              CPU/OpenCV
-mouse dispatch       platform backend
-```
-
-The 21x3 landmark workload stays on CPU unless an end-to-end benchmark proves a GPU path faster. `auto` probes hardware and MediaPipe capability, tries GPU inference when appropriate, and switches once to CPU on initialization failure after releasing input state. `gpu` never silently falls back.
+Normally, leave engine, compute, camera, backend, and profile selection at their safe `auto`/balanced defaults. Configuration is available with `mgesture config show`, `mgesture config path`, and `mgesture config write-example`.
 
 ## Development
 
-```bash
+```sh
 pixi install
 pixi run test
 pixi run lint
@@ -136,28 +157,6 @@ pixi run mojo-build
 pixi run mojo-test
 ```
 
-The model is downloaded only by `model install`, stored in the OS cache, and verified against a pinned SHA-256. It is not downloaded at launch.
+The model is downloaded only by the explicit `mgesture model install` command and stored in the OS cache. Standalone releases bundle a verified model, native Mojo engine, Python fallback, checksums, manifest, SBOM, and provenance metadata for six native targets.
 
-`mgesture update` is explicit and stages the latest target through the same installer verification path. Unix uninstall is `install.sh --uninstall`; PowerShell uninstall is `install.ps1 -Uninstall`. Neither removes configuration or calibration by default.
-
-## Privacy
-
-Processing is local. Frames are not uploaded, saved, or sent to telemetry by default. Optional debug recording is not enabled by the runtime. See [docs/PRIVACY.md](docs/PRIVACY.md).
-
-## Indonesian quick start
-
-```bash
-export PATH="$HOME/.pixi/bin:$PATH"
-pixi install
-pixi run python -m mgesture model install
-pixi run python -m mgesture doctor
-pixi run python -m mgesture run --engine python --compute auto
-```
-
-Aplikasi mulai dalam keadaan jeda untuk mencegah klik tidak sengaja. Tekan Space pada pratinjau untuk mengaktifkan, dan Q atau Escape untuk berhenti darurat. Kamera diproses secara lokal; frame tidak diunggah dan telemetri tidak digunakan.
-
-## Known limitations
-
-MediaPipe Python GPU delegate support is platform/package-specific and must initialize successfully; no GPU claim is made from hardware presence alone. X11, macOS Quartz, and Windows use the native logical multi-monitor layout; Wayland uinput injects relative events because Wayland has no common cursor/layout query, so its configured display bounds are an estimate and the first absolute target is suppressed. Webcam and real-pointer behavior remain hardware/manual checks, not ordinary CI checks.
-
-License: Apache-2.0 for this project. MediaPipe and its model retain their upstream licenses and terms.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/GESTURES.md](docs/GESTURES.md), [docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md), [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md), and [docs/PRIVACY.md](docs/PRIVACY.md) for engineering and platform details.

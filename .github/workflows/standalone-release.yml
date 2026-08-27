@@ -325,7 +325,10 @@ jobs:
         run: |
           set -euo pipefail
           release="v${VERSION}"
-          notes=$'Verified build commit: '"${TARGET_SHA}"$'\n\nStandalone targets: Linux x86_64/ARM64, macOS x86_64/ARM64, and Windows x86_64/ARM64. Every bundle contains the native Mojo engine plus the Python reference fallback; GPU support remains runtime-specific.'
+          notes_file="release-notes/${release}.md"
+          test -f "${notes_file}"
+          notes="$(cat "${notes_file}")"
+          notes="${notes}"$'\n\nVerified build commit: '"${TARGET_SHA}"
           if gh release view "${release}" >/dev/null 2>&1; then
             gh release edit "${release}" --title "mgesture ${VERSION}" --notes "${notes}"
             gh release upload "${release}" release-assets/* --clobber
