@@ -18,6 +18,7 @@ from .config import (
     config_text,
     load_config,
     onboarding_completed,
+    reset_targets,
     reset_user_data,
     with_overrides,
     write_config,
@@ -42,6 +43,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"mgesture {__version__}")
     parser.add_argument("--reset", action="store_true", help="reset all mgesture user data")
     parser.add_argument("--yes", action="store_true", help="confirm a destructive reset")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="show reset targets without deleting anything"
+    )
     parser.add_argument("--engine", dest="global_engine", choices=("auto", "mojo", "python"))
     subparsers = parser.add_subparsers(dest="command")
 
@@ -114,7 +118,25 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _reset_command(yes: bool) -> int:
+def _reset_command(yes: bool, dry_run: bool = False) -> int:
+    if dry_run:
+        try:
+            targets = reset_targets()
+        except (OSError, RuntimeError) as exc:
+            print(f"mgesture reset: {exc}", file=sys.stderr)
+            return 1
+        print("Reset preview")
+        print("\nWill remove:")
+        existing = [target for target in targets if target.path.exists() or target.path.is_symlink()]
+        if existing:
+            for target in existing:
+                print(f"  {target.label}")
+        else:
+            print("  (nothing; user state is already clear)")
+        print("\nProtected:")
+        print("  installed executable, release directories, bundled runtime, and model")
+        print("\nNothing was deleted.")
+        return 0
     if not yes:
         if not sys.stdin.isatty():
             print(
@@ -181,9 +203,11 @@ def main(argv: list[str] | None = None) -> None:
     if args.reset:
         if args.command is not None:
             raise SystemExit("mgesture --reset must be used without a subcommand")
-        raise SystemExit(_reset_command(args.yes))
+        raise SystemExit(_reset_command(args.yes, args.dry_run))
     if args.yes:
         raise SystemExit("mgesture --yes is only valid with --reset")
+    if args.dry_run:
+        raise SystemExit("mgesture --dry-run is only valid with --reset")
     if args.command is None:
         args = _parser().parse_args(["run", *raw_argv])
     if args.command == "config":

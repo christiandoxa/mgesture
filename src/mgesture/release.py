@@ -202,7 +202,8 @@ def run_update(check_only: bool = False) -> int:
             "installer script is not present in this build; reinstall from the latest GitHub release"
         )
     environment = os.environ.copy()
-    environment["MGESTURE_RELEASE"] = "latest"
+    # Pin the installer to the manifest we just checked; latest can move between reads.
+    environment["MGESTURE_RELEASE"] = str(status["latest"])
     if sys.platform == "win32":
         command = [
             "powershell",

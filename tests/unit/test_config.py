@@ -29,6 +29,7 @@ def test_reset_removes_only_owned_user_directories(tmp_path: Path, monkeypatch):
     for root in roots.values():
         root.mkdir(parents=True)
         (root / "owned").write_text("x")
+    (roots["config"] / "config.toml").write_text("config")
     keep = tmp_path / "keep.txt"
     keep.write_text("keep")
     monkeypatch.setattr(config, "config_path", lambda: roots["config"] / "config.toml")
@@ -40,7 +41,9 @@ def test_reset_removes_only_owned_user_directories(tmp_path: Path, monkeypatch):
 
     assert len(removed) == 4
     assert keep.read_text() == "keep"
-    assert all(not root.exists() for root in roots.values())
+    assert roots["config"].exists()
+    assert not (roots["config"] / "config.toml").exists()
+    assert all(not roots[name].exists() for name in ("data", "cache", "logs"))
     assert config.reset_user_data() == ()
 
 
@@ -63,3 +66,90 @@ def test_reset_rejects_symlinked_owned_directory(tmp_path: Path, monkeypatch):
     else:
         raise AssertionError("symlinked reset target was accepted")
     assert outside.exists()
+
+
+def test_reset_dry_run_does_not_delete_user_state(tmp_path: Path, monkeypatch):
+    roots = {name: tmp_path / name / "mgesture" for name in ("config", "data", "cache", "logs")}
+    for root in roots.values():
+        root.mkdir(parents=True)
+        (root / "owned").write_text("x")
+    (roots["config"] / "config.toml").write_text("config")
+    monkeypatch.setattr(config, "config_path", lambda: roots["config"] / "config.toml")
+    monkeypatch.setattr(config, "data_dir", lambda: roots["data"])
+    monkeypatch.setattr(config, "cache_dir", lambda: roots["cache"])
+    monkeypatch.setattr(config, "log_dir", lambda: roots["logs"])
+
+    labels = config.reset_user_data(dry_run=True)
+
+    assert labels == (
+        "configuration",
+        "user data, calibration, tutorial state, and recordings",
+        "cached application data",
+        "application logs",
+    )
+    assert all(root.exists() for root in roots.values())
+
+
+def test_reset_unlinks_symlink_children_without_following_them(tmp_path: Path, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "keep.txt"
+    secret.write_text("keep")
+    cache = tmp_path / "cache" / "mgesture"
+    cache.mkdir(parents=True)
+    (cache / "escape").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config/mgesture/config.toml")
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path / "data/mgesture")
+    monkeypatch.setattr(config, "cache_dir", lambda: cache)
+    monkeypatch.setattr(config, "log_dir", lambda: tmp_path / "logs/mgesture")
+
+    config.reset_user_data()
+
+    assert secret.read_text() == "keep"
+
+
+def test_reset_preserves_direct_standalone_bundle(tmp_path: Path, monkeypatch):
+    bundle = tmp_path / "mgesture"
+    binary = bundle / "bin/mgesture"
+    native = bundle / "runtime/mojo/libmgesture_mojo.so"
+    model = bundle / "share/mgesture/models/hand_landmarker.task"
+    binary.parent.mkdir(parents=True)
+    native.parent.mkdir(parents=True)
+    model.parent.mkdir(parents=True)
+    binary.write_text("binary")
+    native.write_text("native")
+    model.write_text("model")
+    (bundle / "state.json").write_text("state")
+    (bundle / "recordings").mkdir()
+    monkeypatch.setenv("MGESTURE_BUNDLE_ROOT", str(bundle))
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config/mgesture/config.toml")
+    monkeypatch.setattr(config, "data_dir", lambda: bundle)
+    monkeypatch.setattr(config, "cache_dir", lambda: tmp_path / "cache/mgesture")
+    monkeypatch.setattr(config, "log_dir", lambda: tmp_path / "logs/mgesture")
+
+    config.reset_user_data()
+
+    assert binary.exists()
+    assert native.exists()
+    assert model.exists()
+    assert not (bundle / "state.json").exists()
+    assert not (bundle / "recordings").exists()
+
+
+def test_reset_rejects_non_data_target_inside_installation(tmp_path: Path, monkeypatch):
+    bundle = tmp_path / "mgesture"
+    (bundle / "bin").mkdir(parents=True)
+    (bundle / "current").mkdir()
+    (bundle / "releases").mkdir()
+    monkeypatch.setenv("MGESTURE_BUNDLE_ROOT", str(bundle))
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config/mgesture/config.toml")
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path / "data/mgesture")
+    monkeypatch.setattr(config, "cache_dir", lambda: bundle)
+    monkeypatch.setattr(config, "log_dir", lambda: tmp_path / "logs/mgesture")
+
+    try:
+        config.reset_targets()
+    except RuntimeError as exc:
+        assert "installed application" in str(exc)
+    else:
+        raise AssertionError("reset accepted an installation root as mutable cache")

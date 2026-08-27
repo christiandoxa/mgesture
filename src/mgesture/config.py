@@ -3,7 +3,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-import shutil
+import stat
+import sys
 import tempfile
 import tomllib
 from dataclasses import dataclass, fields, replace
@@ -13,6 +14,13 @@ from typing import Any
 from platformdirs import user_cache_dir, user_config_dir, user_data_dir, user_log_dir
 
 STATE_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True, slots=True)
+class ResetTarget:
+    label: str
+    path: Path
+    legacy_install_entry: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,27 +188,165 @@ def _safe_owned_directory(path: Path) -> Path:
     return path
 
 
-def reset_user_data() -> tuple[str, ...]:
-    """Remove mgesture user state while retaining installed application assets."""
-    removed: list[str] = []
-    targets = (
-        (config_path().parent, "configuration"),
-        (data_dir(), "user data, calibration, tutorial state, and recordings"),
-        (cache_dir(), "cached application data"),
-        (log_dir(), "application logs"),
+def _absolute(path: Path) -> Path:
+    return path.expanduser().absolute()
+
+
+def _resolved(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve(strict=False)
+    except OSError as exc:
+        raise RuntimeError(f"cannot validate mgesture reset path: {path}") from exc
+
+
+def _looks_like_bundle_root(path: Path) -> bool:
+    return (
+        (path / "bin" / "mgesture").is_file()
+        or (path / "bin" / "mgesture.exe").is_file()
+    ) and (path / "share" / "mgesture" / "release-metadata.json").is_file()
+
+
+def _installation_roots() -> tuple[Path, ...]:
+    """Find installed bundle roots without treating a source checkout as one."""
+    roots: set[Path] = set()
+    for value in (os.environ.get("MGESTURE_INSTALL_DIR"), os.environ.get("MGESTURE_BUNDLE_ROOT")):
+        if value:
+            candidate = _resolved(Path(value))
+            roots.add(candidate.parent if candidate.name.casefold() == "current" else candidate)
+    executable = _resolved(Path(sys.executable))
+    for ancestor in (executable, *executable.parents):
+        if ancestor.name.casefold() == "current":
+            roots.add(ancestor.parent)
+        if ancestor.parent.name.casefold() == "releases":
+            roots.add(ancestor.parent.parent)
+        if _looks_like_bundle_root(ancestor):
+            roots.add(ancestor)
+        if (ancestor / "current").exists() and (ancestor / "releases").is_dir():
+            roots.add(ancestor)
+    return tuple(sorted(roots))
+
+
+def _legacy_install_root(path: Path) -> Path | None:
+    resolved = _resolved(path)
+    for root in _installation_roots():
+        if resolved == root:
+            return root
+    return None
+
+
+def _protected_paths() -> tuple[Path, ...]:
+    home = _resolved(Path.home())
+    candidates = {
+        home,
+        _resolved(Path(sys.executable)),
+        _resolved(Path(os.path.abspath(os.sep))),
+    }
+    for value in (
+        os.environ.get("MGESTURE_INSTALL_DIR"),
+        os.environ.get("MGESTURE_BUNDLE_ROOT"),
+        os.environ.get("PROGRAMFILES"),
+        os.environ.get("LOCALAPPDATA"),
+    ):
+        if value:
+            candidates.add(_resolved(Path(value)))
+    candidates.update(
+        _resolved(home / suffix)
+        for suffix in (".local", ".local/bin", ".local/share", ".config", ".cache")
     )
-    paths: list[tuple[Path, str]] = []
-    seen: set[Path] = set()
-    for raw_path, label in targets:
-        path = _safe_owned_directory(raw_path)
-        if path in seen:
-            continue
-        seen.add(path)
-        paths.append((path, label))
-    for path, label in paths:
-        if path.exists():
-            shutil.rmtree(path)
-            removed.append(label)
+    if os.name != "nt":
+        candidates.update(_resolved(Path(value)) for value in ("/usr", "/usr/local"))
+    return tuple(candidates)
+
+
+def _is_descendant(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_reset_target(target: ResetTarget, protected: tuple[Path, ...]) -> None:
+    path = _absolute(target.path)
+    if not path.parts or path == Path(path.anchor):
+        raise RuntimeError(f"refusing unsafe mgesture reset path: {path}")
+    current = path
+    while current != current.parent:
+        if current.is_symlink():
+            raise RuntimeError(f"refusing unsafe symlinked mgesture reset path: {path}")
+        current = current.parent
+    resolved = _resolved(path)
+    for protected_path in protected:
+        if any(resolved == root for root in _installation_roots()):
+            break
+        if resolved == protected_path or _is_descendant(protected_path, resolved):
+            raise RuntimeError(f"refusing unsafe mgesture reset path: {path}")
+    for root in _installation_roots():
+        inside_install = _is_descendant(resolved, root)
+        if inside_install and not target.legacy_install_entry:
+            raise RuntimeError(f"refusing to reset installed application path: {path}")
+        if not inside_install and _is_descendant(root, resolved):
+            raise RuntimeError(f"refusing broad reset path containing installation: {path}")
+    if target.legacy_install_entry:
+        if path.name not in {"state.json", "recordings"}:
+            raise RuntimeError(f"refusing unsafe legacy reset path: {path}")
+        if _legacy_install_root(path.parent) is None:
+            raise RuntimeError(f"refusing unsafe legacy reset path: {path}")
+
+
+def reset_targets() -> tuple[ResetTarget, ...]:
+    """Return the exact mutable paths eligible for reset after safety validation."""
+    data = _absolute(data_dir())
+    legacy_root = _legacy_install_root(data)
+    if legacy_root is None:
+        data_targets = (
+            ResetTarget("user data, calibration, tutorial state, and recordings", data),
+        )
+    else:
+        data_targets = (
+            ResetTarget("tutorial state", data / "state.json", True),
+            ResetTarget("landmark recordings", data / "recordings", True),
+        )
+    targets = (
+        ResetTarget("configuration", _absolute(config_path())),
+        *data_targets,
+        ResetTarget("cached application data", _absolute(cache_dir())),
+        ResetTarget("application logs", _absolute(log_dir())),
+    )
+    protected = _protected_paths()
+    for target in targets:
+        _validate_reset_target(target, protected)
+    return targets
+
+
+def _remove_without_following_links(path: Path) -> None:
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+        path.unlink()
+        return
+    with os.scandir(path) as entries:
+        for entry in entries:
+            child = Path(entry.path)
+            if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                child.unlink()
+            else:
+                _remove_without_following_links(child)
+    path.rmdir()
+
+
+def reset_user_data(dry_run: bool = False) -> tuple[str, ...]:
+    """Remove only validated mutable state; never remove an installation root."""
+    targets = reset_targets()
+    if dry_run:
+        return tuple(target.label for target in targets)
+    removed: list[str] = []
+    for target in targets:
+        if target.path.exists() or target.path.is_symlink():
+            _remove_without_following_links(target.path)
+            removed.append(target.label)
     return tuple(removed)
 
 
