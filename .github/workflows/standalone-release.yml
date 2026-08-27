@@ -205,11 +205,28 @@ jobs:
           pixi run python scripts/release/validate_architecture.py bundle --target "${{ matrix.target }}" --root "$RUNNER_TEMP/mgesture-clean/mgesture"
           binary="$RUNNER_TEMP/mgesture-clean/mgesture/bin/mgesture"
           env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" --version
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" --help >/dev/null
           env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" self-test --headless --fake-input --engine mojo
           env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" doctor --runtime --json | tee "$RUNNER_TEMP/mgesture-doctor.json"
           grep -F '"compiler_required": false' "$RUNNER_TEMP/mgesture-doctor.json"
           grep -F '"active_engine": "mojo"' "$RUNNER_TEMP/mgesture-doctor.json"
           env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" replay --fixture "$RUNNER_TEMP/mgesture-clean/mgesture/share/mgesture/fixtures/basic.json" --engine mojo >/dev/null
+      - name: Verify reset preserves extracted application (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/mgesture-clean/mgesture"
+          binary="$bundle/bin/mgesture"
+          native="$bundle/runtime/mojo/libmgesture_mojo.so"
+          bundle_parent="$(dirname "$bundle")"
+          reset_home="$RUNNER_TEMP/mgesture-reset-home"
+          mkdir -p "$reset_home"
+          env -i PATH=/usr/bin:/bin HOME="$reset_home" XDG_DATA_HOME="$bundle_parent" XDG_CONFIG_HOME="$reset_home/config" XDG_CACHE_HOME="$reset_home/cache" XDG_STATE_HOME="$reset_home/state" MGESTURE_BUNDLE_ROOT="$bundle" "$binary" --reset --yes
+          test -x "$binary"
+          test -f "$native"
+          env -i PATH=/usr/bin:/bin HOME="$reset_home" XDG_DATA_HOME="$bundle_parent" XDG_CONFIG_HOME="$reset_home/config" XDG_CACHE_HOME="$reset_home/cache" XDG_STATE_HOME="$reset_home/state" MGESTURE_BUNDLE_ROOT="$bundle" "$binary" --version
+          env -i PATH=/usr/bin:/bin HOME="$reset_home" XDG_DATA_HOME="$bundle_parent" XDG_CONFIG_HOME="$reset_home/config" XDG_CACHE_HOME="$reset_home/cache" XDG_STATE_HOME="$reset_home/state" MGESTURE_BUNDLE_ROOT="$bundle" "$binary" self-test --headless --fake-input --engine mojo >/dev/null
       - name: Extract and execute clean-machine smoke (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -227,11 +244,33 @@ jobs:
           $env:MGESTURE_BUNDLE_ROOT = $bundle
           & $binary --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $binary --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $binary self-test --headless --fake-input --engine mojo
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $doctor = & $binary doctor --runtime --json | Out-String
           if ($LASTEXITCODE -ne 0 -or ($doctor -notmatch '"compiler_required": false') -or ($doctor -notmatch '"active_engine": "mojo"')) { throw "standalone runtime diagnostics failed" }
           & $binary replay --fixture (Join-Path $bundle "share\mgesture\fixtures\basic.json") --engine mojo | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify reset preserves extracted application (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundle = Join-Path $env:RUNNER_TEMP "mgesture-clean\mgesture"
+          $binary = Join-Path $bundle "bin\mgesture.exe"
+          $native = Join-Path $bundle "runtime\mojo\mgesture_mojo.dll"
+          $resetParent = Join-Path $env:RUNNER_TEMP "mgesture-reset-home"
+          New-Item -ItemType Directory -Force -Path $resetParent | Out-Null
+          $env:LOCALAPPDATA = $resetParent
+          $env:APPDATA = Join-Path $resetParent "roaming"
+          $env:MGESTURE_BUNDLE_ROOT = $bundle
+          & $binary --reset --yes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath $binary) -or -not (Test-Path -LiteralPath $native)) { throw "reset removed standalone application files" }
+          & $binary --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $binary self-test --headless --fake-input --engine mojo | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload standalone archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

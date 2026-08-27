@@ -129,6 +129,20 @@ def test_landmarker_normalizes_mediapipe_label_to_physical_hand(
 
     assert result is not None and result.hand is not None
     assert result.hand.frame.handedness is expected
+    assert len(result.hands) == 1
+
+
+def test_landmarker_can_recalibrate_input_orientation_without_second_inference() -> None:
+    landmarker = _bare_landmarker(HandSelection.EITHER, mirrored_input=False)
+
+    first = _deliver(landmarker, 1, "Right")
+    landmarker.set_handedness_mirrored_input(True)
+    second = _deliver(landmarker, 2, "Right")
+
+    assert first is not None and first.hand is not None
+    assert second is not None and second.hand is not None
+    assert first.hand.frame.physical_hand is PhysicalHand.LEFT
+    assert second.hand.frame.physical_hand is PhysicalHand.RIGHT
 
 
 def test_landmarker_locks_auto_selection_when_result_order_changes() -> None:

@@ -42,9 +42,11 @@ Hardware detection and compute policy remain centralized. Configuration is the s
 The CLI composes existing domain services. Diagnostics report actual status and never claim untested support.
 Python defines gesture semantics. Mojo mirrors those semantics and is accepted only after compile and parity checks.
 
-- Keep camera-image/preview transforms separate from handedness normalization, landmark transforms, and pointer/monitor mapping; a display mirror must not silently change gesture semantics.
-- `config.reset_user_data()` is the sole owner of user-state deletion; the CLI owns confirmation and must retain bundled runtime assets.
-- `release.py` owns release resolution and update decisions; `install.sh` and `install.ps1` own download, verification, and activation. The CLI delegates instead of duplicating updater logic.
+- Keep camera orientation, preview mirroring, physical handedness, user hand preference, landmark transforms, and pointer/monitor mapping separate; a display mirror must not silently change gesture semantics.
+- Gesture engines consume canonical normalized landmarks and physical handedness; left- and right-hand users share one gesture implementation. Any handedness change requires mirrored/unmirrored × left/right regression tests.
+- `config.reset_user_data()` is the sole owner of user-state deletion and may delete only an allowlist of canonical mutable paths; installation roots, executables, release directories, bundled runtimes, models, and active metadata are protected.
+- `release.py` owns release resolution and update decisions; `install.sh` and `install.ps1` own download, verification, staging, self-test, and activation. Update preserves user state; reset preserves application files.
+- Every standalone release must exercise `--reset` and prove the packaged executable remains usable afterward.
 
 ## Reuse-first rule
 

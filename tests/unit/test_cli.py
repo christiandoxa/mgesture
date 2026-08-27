@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import mgesture.cli as cli
@@ -81,6 +83,25 @@ def test_reset_yes_delegates_to_user_state_owner(monkeypatch: pytest.MonkeyPatch
     assert calls == [True]
 
 
+def test_reset_dry_run_never_calls_delete(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    class Target:
+        label = "configuration"
+        path = Path("/tmp/mgesture-config")
+
+    monkeypatch.setattr(cli, "reset_targets", lambda: (Target(),))
+    monkeypatch.setattr(
+        cli,
+        "reset_user_data",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("delete called")),
+    )
+
+    with pytest.raises(SystemExit) as result:
+        main(["--reset", "--dry-run"])
+
+    assert result.value.code == 0
+    assert "Nothing was deleted." in capsys.readouterr().out
+
+
 def test_first_run_runs_tutorial_before_application(monkeypatch: pytest.MonkeyPatch):
     calls = []
 
@@ -94,7 +115,7 @@ def test_first_run_runs_tutorial_before_application(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(cli, "Application", Application)
     monkeypatch.setattr(cli, "onboarding_completed", lambda: False)
-    monkeypatch.setattr(cli, "run_tutorial", lambda config: calls.append("tutorial") or 0)
+    monkeypatch.setattr(cli, "run_tutorial", lambda config, **kwargs: calls.append("tutorial") or 0)
 
     assert cli._run_application(_parser().parse_args(["run"])) == 0
     assert calls == ["tutorial", "application", "run"]

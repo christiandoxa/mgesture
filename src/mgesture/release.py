@@ -108,8 +108,11 @@ def resolve_release(release: str = "latest", target: str | None = None) -> dict[
     if manifest.get("schema_version") != 1:
         raise RuntimeError("unsupported release manifest schema")
     version = manifest.get("version")
-    if not isinstance(version, str) or not _VERSION_RE.fullmatch(version):
+    if not isinstance(version, str) or not _VERSION_RE.fullmatch(version) or "-" in version:
         raise RuntimeError("release manifest does not contain a stable semantic version")
+    commit = manifest.get("commit")
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+        raise RuntimeError("release manifest does not contain a full commit SHA")
     targets = manifest.get("targets")
     if not isinstance(targets, dict):
         raise RuntimeError("release manifest has no target matrix")
@@ -128,6 +131,9 @@ def resolve_release(release: str = "latest", target: str | None = None) -> dict[
         or row.get("python_engine_available") is not True
     ):
         raise RuntimeError(f"release manifest target metadata is invalid for {target}")
+    expected_architecture = target.split("-", 1)[0]
+    if row.get("architecture", row.get("arch")) != expected_architecture:
+        raise RuntimeError(f"release manifest architecture is invalid for {target}")
     digest = row.get("sha256")
     if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
         raise RuntimeError(f"release manifest has no valid checksum for {target}")

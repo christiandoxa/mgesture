@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tarfile
@@ -73,6 +74,107 @@ def test_mojo_source_hash_is_line_ending_independent(tmp_path: Path) -> None:
     (source_dir / "mgesture_core.mojo").write_bytes(b"one\r\ntwo\r\n")
     (source_dir / "mgesture_python.mojo").write_bytes(b"three\r\nfour\r\n")
     assert mojo_source_metadata(source_dir)["sha256"] == unix_hash
+
+
+def _update_manifest(target: str, version: str, asset: str) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "version": version,
+        "commit": "0" * 40,
+        "targets": {
+            target: {
+                "target": target,
+                "asset": asset,
+                "sha256": "0" * 64,
+                "standalone": True,
+                "native_mojo_engine": True,
+                "python_engine_available": True,
+                "architecture": target.split("-", 1)[0],
+            }
+        },
+    }
+
+
+def test_update_checks_stable_manifest_and_pins_download_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import mgesture.release as release
+
+    target = "x86_64-unknown-linux-gnu"
+    asset = f"mgesture-{target}.tar.gz"
+    (tmp_path / "release-manifest.json").write_text(
+        json.dumps(_update_manifest(target, "0.3.0", asset)), encoding="utf-8"
+    )
+    installer = tmp_path / "install.sh"
+    installer.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    calls: list[tuple[list[str], dict[str, str], bool]] = []
+    monkeypatch.setenv("MGESTURE_RELEASE_BASE_URL", str(tmp_path))
+    monkeypatch.setattr(release, "__version__", "0.2.0")
+    monkeypatch.setattr(release, "current_target", lambda: target)
+    monkeypatch.setattr(release, "_installer_path", lambda: installer)
+    monkeypatch.setattr(
+        release.subprocess,
+        "run",
+        lambda command, *, env, check: (
+            calls.append((command, env, check)) or SimpleNamespace(returncode=0)
+        ),
+    )
+
+    status = release.check_for_update()
+    assert status["update_available"] is True
+    assert status["newer_installed"] is False
+    assert release.run_update() == 0
+    assert calls[0][1]["MGESTURE_RELEASE"] == "0.3.0"
+
+
+@pytest.mark.parametrize(
+    ("current", "latest", "available", "newer_installed"),
+    (("0.3.0", "0.3.0", False, False), ("0.4.0", "0.3.0", False, True)),
+)
+def test_update_never_reinstalls_or_downgrades(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    current: str,
+    latest: str,
+    available: bool,
+    newer_installed: bool,
+) -> None:
+    import mgesture.release as release
+
+    target = "x86_64-unknown-linux-gnu"
+    asset = f"mgesture-{target}.tar.gz"
+    (tmp_path / "release-manifest.json").write_text(
+        json.dumps(_update_manifest(target, latest, asset)), encoding="utf-8"
+    )
+    monkeypatch.setenv("MGESTURE_RELEASE_BASE_URL", str(tmp_path))
+    monkeypatch.setattr(release, "__version__", current)
+    monkeypatch.setattr(release, "current_target", lambda: target)
+
+    status = release.check_for_update()
+
+    assert status["update_available"] is available
+    assert status["newer_installed"] is newer_installed
+
+
+def test_update_rejects_wrong_target_asset_or_manifest_capabilities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import mgesture.release as release
+
+    target = "x86_64-unknown-linux-gnu"
+    manifest = _update_manifest(target, "0.3.0", "wrong.tar.gz")
+    (tmp_path / "release-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("MGESTURE_RELEASE_BASE_URL", str(tmp_path))
+    monkeypatch.setattr(release, "current_target", lambda: target)
+
+    with pytest.raises(RuntimeError, match="invalid asset"):
+        release.resolve_release()
+
+
+def test_explicit_release_url_uses_v_prefixed_tag() -> None:
+    import mgesture.release as release
+
+    assert release.release_base_url("0.3.0").endswith("/releases/download/v0.3.0")
 
 
 def test_ci_matrix_uses_all_stable_targets_and_native_runners() -> None:
@@ -236,8 +338,10 @@ def test_readme_capability_table_matches_target_matrix() -> None:
         assert fields[5] == ("Yes" if target.python_engine else "No"), name
 
 
-def _release_fixture(path: Path) -> None:
-    version = __version__
+def _release_fixture(
+    path: Path, version: str = __version__, manifest_version: str | None = None
+) -> None:
+    rendered_version = manifest_version or version
     bundle = path / "bundle" / "mgesture" / "bin"
     bundle.mkdir(parents=True)
     binary = bundle / "mgesture"
@@ -274,7 +378,7 @@ def _release_fixture(path: Path) -> None:
             sys.executable,
             "scripts/release/render_manifest.py",
             "--version",
-            version,
+            rendered_version,
             "--commit",
             "0" * 40,
             "--assets",
@@ -290,7 +394,7 @@ def _release_fixture(path: Path) -> None:
             sys.executable,
             "scripts/release/sbom.py",
             "--version",
-            version,
+            rendered_version,
             "--assets",
             str(path),
             "--output",
@@ -308,11 +412,31 @@ def _release_fixture(path: Path) -> None:
             "scripts/release/verify_release.py",
             str(path),
             "--version",
-            version,
+            rendered_version,
         ],
         cwd=ROOT,
         check=True,
     )
+    if version != rendered_version:
+        manifest = path / "release-manifest.json"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                f'"version": "{rendered_version}"', f'"version": "{version}"', 1
+            ),
+            encoding="utf-8",
+        )
+        tsv = path / "release-manifest.tsv"
+        tsv.write_text(
+            tsv.read_text(encoding="utf-8").replace(
+                f"# version\t{rendered_version}", f"# version\t{version}", 1
+            ),
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [sys.executable, "scripts/release/generate_checksums.py", str(path)],
+            cwd=ROOT,
+            check=True,
+        )
 
 
 @pytest.mark.skipif(
@@ -388,3 +512,116 @@ def test_unix_installer_stages_and_activates_without_python_runtime(tmp_path: Pa
     )
     assert failed.returncode != 0
     assert not (home / "app" / "current").exists()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="the Unix installer is not available on Windows"
+)
+def test_unix_install_transition_preserves_user_state(tmp_path: Path):
+    old_release = tmp_path / "old-release"
+    new_release = tmp_path / "new-release"
+    old_release.mkdir()
+    new_release.mkdir()
+    _release_fixture(old_release, "0.2.0", manifest_version=__version__)
+    _release_fixture(new_release, "0.3.0", manifest_version=__version__)
+    home = tmp_path / "home"
+    app = home / "app"
+    bin_dir = home / "bin"
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(home),
+        "SHELL": "/bin/sh",
+        "MGESTURE_RELEASE_BASE_URL": str(old_release),
+        "MGESTURE_INSTALL_DIR": str(app),
+        "MGESTURE_BIN_DIR": str(bin_dir),
+        "MGESTURE_NO_PATH_UPDATE": "true",
+    }
+    installed = subprocess.run(
+        ["sh", str(ROOT / "install.sh")], cwd=ROOT, env=env, capture_output=True, text=True
+    )
+    assert installed.returncode == 0, installed.stderr
+    config_file = home / ".config/mgesture/config.toml"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("saved", encoding="utf-8")
+    state_file = app / "state.json"
+    state_file.write_text("saved-state", encoding="utf-8")
+
+    updated = subprocess.run(
+        ["sh", str(ROOT / "install.sh")],
+        cwd=ROOT,
+        env={**env, "MGESTURE_RELEASE_BASE_URL": str(new_release), "MGESTURE_RELEASE": "0.3.0"},
+        capture_output=True,
+        text=True,
+    )
+
+    assert updated.returncode == 0, updated.stderr
+    assert (
+        subprocess.run(
+            [str(bin_dir / "mgesture"), "--version"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        == "mgesture 0.3.0"
+    )
+    assert config_file.read_text(encoding="utf-8") == "saved"
+    assert state_file.read_text(encoding="utf-8") == "saved-state"
+    assert (app / "releases").is_dir()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="the Unix installer is not available on Windows"
+)
+def test_run_update_transitions_fixture_and_preserves_state(tmp_path: Path, monkeypatch) -> None:
+    import mgesture.release as release
+
+    old_release = tmp_path / "old-release"
+    new_release = tmp_path / "new-release"
+    old_release.mkdir()
+    new_release.mkdir()
+    _release_fixture(old_release, "0.2.0", manifest_version=__version__)
+    _release_fixture(new_release, "0.3.0", manifest_version=__version__)
+    home = tmp_path / "home"
+    app = home / "app"
+    bin_dir = home / "bin"
+    environment = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(home),
+        "SHELL": "/bin/sh",
+        "MGESTURE_RELEASE_BASE_URL": str(old_release),
+        "MGESTURE_INSTALL_DIR": str(app),
+        "MGESTURE_BIN_DIR": str(bin_dir),
+        "MGESTURE_NO_PATH_UPDATE": "true",
+    }
+    installed = subprocess.run(
+        ["sh", str(ROOT / "install.sh")],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert installed.returncode == 0, installed.stderr
+    config_file = home / ".config/mgesture/config.toml"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("saved-config", encoding="utf-8")
+    monkeypatch.setenv("MGESTURE_RELEASE_BASE_URL", str(new_release))
+    monkeypatch.setenv("MGESTURE_INSTALL_DIR", str(app))
+    monkeypatch.setenv("MGESTURE_BIN_DIR", str(bin_dir))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(release, "current_target", lambda: "x86_64-unknown-linux-gnu")
+    monkeypatch.setattr(release, "_installer_path", lambda: ROOT / "install.sh")
+    monkeypatch.setattr(release, "__version__", "0.2.0")
+
+    assert release.run_update() == 0
+    assert (
+        subprocess.run(
+            [str(bin_dir / "mgesture"), "--version"],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        == "mgesture 0.3.0"
+    )
+    assert config_file.read_text(encoding="utf-8") == "saved-config"

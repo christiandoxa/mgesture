@@ -47,7 +47,7 @@ def _advance(step: int, progress: dict[str, Any]) -> int:
     return step + 1
 
 
-def _choose_hand(config: AppConfig, enabled: bool) -> AppConfig:
+def _choose_hand(config: AppConfig, enabled: bool, persist_path: Path | None) -> AppConfig:
     if not enabled or not sys.stdin.isatty():
         return config
     current = config.vision.hand_selection
@@ -68,13 +68,15 @@ def _choose_hand(config: AppConfig, enabled: bool) -> AppConfig:
         return config
     updated = replace(config, vision=replace(config.vision, hand_selection=selected))
     if updated != config:
-        write_config(updated)
+        write_config(updated, persist_path)
     return updated
 
 
-def run_tutorial(config: AppConfig, *, choose_hand: bool = True) -> int:
+def run_tutorial(
+    config: AppConfig, *, choose_hand: bool = True, persist_path: Path | None = None
+) -> int:
     """Run one safe tutorial using the production engine and a fake mouse."""
-    config = _choose_hand(config, choose_hand)
+    config = _choose_hand(config, choose_hand, persist_path)
     try:
         import cv2
     except ImportError as exc:
@@ -435,7 +437,7 @@ def run_tutorial(config: AppConfig, *, choose_hand: bool = True) -> int:
                                 handedness_mirror="on" if inference_mirror else "off",
                             ),
                         )
-                        write_config(config)
+                        write_config(config, persist_path)
                         last_success = f"✓ Physical {mirror_candidate.frame.physical_hand.value.lower()} hand confirmed"
                         step = _advance(step, progress)
                     elif (

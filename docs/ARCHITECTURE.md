@@ -12,7 +12,7 @@ Camera (bounded newest-frame buffer, reconnect/backoff)
   -> MouseBackend
 ```
 
-The vision boundary swaps MediaPipe's label only when the submitted image is unmirrored, then selects one canonical physical hand. `camera.mirror` mirrors preview pixels and pointer X mapping independently. The engine owns filtering, normalized palm-scale pinch distances, hysteresis, debounce, hand-loss and hand-switch cleanup, reacquisition, scroll accumulation, pause state, and action ordering. Camera and preview never dispatch mouse events. The input dispatcher translates typed actions and calls the shared idempotent `release_all()` safety contract.
+The vision boundary normalizes MediaPipe's selfie-relative label into a canonical physical hand using the configured inference-image orientation, then selects one stable hand. Preview mirroring and pointer X mapping are separate settings and never alter gesture semantics. The engine owns filtering, normalized palm-scale pinch distances, hysteresis, debounce, hand-loss and hand-switch cleanup, reacquisition, scroll accumulation, pause state, and action ordering. Camera and preview never dispatch mouse events. The input dispatcher translates typed actions and calls the shared idempotent `release_all()` safety contract.
 
 `mgesture` and `mgesture run` share one startup path. That path checks the platform user-data onboarding state; a missing completion flag runs `onboarding.run_tutorial` with the production Python gesture engine and a fake input dispatcher. Only completed or intentionally skipped onboarding starts the real application backend. `mgesture --reset` owns user-state deletion through `config.reset_user_data` and never targets bundled runtime files.
 

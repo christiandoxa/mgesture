@@ -200,22 +200,6 @@ def set_onboarding_completed(completed: bool = True) -> Path:
     return target
 
 
-def _safe_owned_directory(path: Path) -> Path:
-    """Accept only mgesture's app directory or its platform log/cache child."""
-    path = path.expanduser()
-    app_name = path.name.casefold()
-    valid_child = app_name in {"cache", "logs", "log"} and path.parent.name.casefold() == "mgesture"
-    if (
-        app_name != "mgesture"
-        and not valid_child
-        or path.parent == path
-        or path.is_symlink()
-        or path.parent.is_symlink()
-    ):
-        raise RuntimeError(f"refusing unsafe mgesture data path: {path}")
-    return path
-
-
 def _absolute(path: Path) -> Path:
     return path.expanduser().absolute()
 
@@ -303,12 +287,12 @@ def _validate_reset_target(target: ResetTarget, protected: tuple[Path, ...]) -> 
             raise RuntimeError(f"refusing unsafe symlinked mgesture reset path: {path}")
         current = current.parent
     resolved = _resolved(path)
-    for protected_path in protected:
-        if any(resolved == root for root in _installation_roots()):
-            break
-        if resolved == protected_path or _is_descendant(protected_path, resolved):
-            raise RuntimeError(f"refusing unsafe mgesture reset path: {path}")
-    for root in _installation_roots():
+    roots = _installation_roots()
+    if resolved not in roots:
+        for protected_path in protected:
+            if resolved == protected_path or _is_descendant(protected_path, resolved):
+                raise RuntimeError(f"refusing unsafe mgesture reset path: {path}")
+    for root in roots:
         inside_install = _is_descendant(resolved, root)
         if inside_install and not target.legacy_install_entry:
             raise RuntimeError(f"refusing to reset installed application path: {path}")

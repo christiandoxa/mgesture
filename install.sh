@@ -10,7 +10,12 @@ tmp=
 stage=
 
 fail() { echo "mgesture installer: $1" >&2; exit 1; }
-cleanup() { [ -z "$stage" ] || rm -rf "$stage"; [ -z "$tmp" ] || rm -rf "$tmp"; }
+cleanup() {
+  [ -z "$stage" ] || rm -rf "$stage"
+  [ -z "$tmp" ] || rm -rf "$tmp"
+  [ -z "${current_tmp:-}" ] || rm -f "$current_tmp"
+  [ -z "${previous_tmp:-}" ] || rm -f "$previous_tmp"
+}
 trap cleanup EXIT INT TERM
 
 sha256() {
@@ -109,7 +114,20 @@ chmod 0755 "$shim"
 mv -f "$shim" "$bin_dir/mgesture"
 current_tmp="$app_root/.current.$$"
 ln -s "$staged_release" "$current_tmp"
-mv -f "$current_tmp" "$app_root/current"
+previous_tmp="$app_root/.current.previous.$$"
+if [ -e "$previous_tmp" ] || [ -L "$previous_tmp" ]; then
+  fail 'temporary activation path already exists'
+fi
+if [ -e "$app_root/current" ] || [ -L "$app_root/current" ]; then
+  mv -f "$app_root/current" "$previous_tmp"
+fi
+if ! mv -f "$current_tmp" "$app_root/current"; then
+  if [ -e "$previous_tmp" ] || [ -L "$previous_tmp" ]; then
+    mv -f "$previous_tmp" "$app_root/current"
+  fi
+  fail 'could not activate staged release; current release was restored'
+fi
+rm -f "$previous_tmp"
 stage=
 echo "mgesture $installed_version installed successfully."
 case ":${PATH:-}:" in *":$bin_dir:"*) ;; *) echo "Current shell: export PATH=\"$bin_dir:\$PATH\"";; esac

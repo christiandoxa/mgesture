@@ -22,6 +22,9 @@ curl -fsSL https://github.com/christiandoxa/mgesture/releases/latest/download/in
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/christiandoxa/mgesture/releases/latest/download/install.ps1 | iex"
 ```
 
+The standalone installers verify the release manifest and checksums before activating a
+versioned, self-contained application. Python, Pixi, and a Mojo compiler are not required.
+
 ## Quick start
 
 After installing, simply run:
@@ -30,102 +33,137 @@ After installing, simply run:
 mgesture
 ```
 
-That’s it. mgesture selects the available camera, compute backend, gesture engine, and desktop input backend using safe defaults. It starts paused; press the configured shortcut, or Space in the preview, to activate it.
+That’s it. mgesture automatically selects the available camera, compute backend, gesture
+engine, and supported desktop input backend using safe defaults. It starts paused; press the
+configured shortcut shown at startup to activate it.
 
-On the first launch, mgesture opens a short safe tutorial. It teaches pointer movement, clicking, holding, dragging, scrolling, pausing, and safe exit using simulated input before normal mouse control is enabled. Later launches skip the tutorial and start paused.
+On the first launch, mgesture asks which hand you want to use and guides you through a short
+interactive tutorial. Later launches go straight to normal operation with your saved settings.
 
 ## How to use mgesture
 
-Use your right hand by default. Select another physical hand with `mgesture run --hand left`, `--hand either`, or `--hand auto`. The preview shows the active camera region, selected hand, and current state.
+mgesture can use your physical right or left hand. Choose a hand during the first-run tutorial;
+the same gesture meanings apply to either hand. The preview shows the selected hand and current
+state.
 
 | Mouse action | Hand gesture |
 |---|---|
-| Move cursor | Move your selected hand's index finger |
+| Move cursor | Move the selected hand’s index finger |
 | Left click | Pinch thumb and index finger, then release |
 | Hold | Keep thumb and index finger pinched |
 | Drag and drop | Keep the left pinch held while moving |
 | Right click | Pinch thumb and middle finger, then release |
 | Right hold | Keep thumb and middle finger pinched |
-| Scroll | Raise index and middle fingers, relax ring and pinky, hold until Scroll mode is active, then move vertically |
+| Scroll | Raise index and middle, relax/fold ring and pinky, keep the thumb relaxed, hold briefly, then move the whole hand vertically |
 | Pause / resume | Use the configured shortcut or the optional open-palm gesture |
 | Exit safely | Press Q/Escape in the preview or Ctrl+C in the terminal |
 
-The camera preview and pointer mapping are mirrored by default. To disable that behavior, run `mgesture config path`, open the reported TOML file, and set:
-
-```toml
-[camera]
-mirror = false
-```
+Scroll has two phases: hold the index-plus-middle pose until **Scroll mode active** appears,
+then move your whole hand. Small fingertip movements are intentionally ignored.
 
 ## First run
 
-The first time you run `mgesture`, an interactive tutorial asks you to show the selected physical hand and practice each gesture. It uses the real camera and canonical gesture engine, but a fake input backend: tutorial practice cannot move or click the real mouse. Press `K` to skip; skipping marks onboarding complete. If you stop before completion, the tutorial runs again next time.
-
-Want to practice again?
-
-```sh
-mgesture tutorial
-```
-
-Replaying the tutorial does not remove calibration or settings.
+The first time you run `mgesture`, the safe tutorial teaches hand selection, camera
+handedness, pointer movement, left click, hold and drag, right click, scrolling, pause/resume,
+and emergency stop. It uses the real camera and production gesture engine with a fake input
+backend, so practice cannot move or click the real mouse. If you stop before completing it, the
+tutorial runs again next time. Press `K` to skip.
 
 ## Calibration
 
-Calibration is optional. Run it to tune pinch thresholds for your hand:
+Calibration is optional but recommended when you want to tune pinch thresholds for your hand and
+camera:
 
 ```sh
 mgesture calibrate
 ```
 
-Calibration uses observation only and never emits real mouse clicks. It collects multiple samples and saves only after enough valid observations.
+Calibration collects multiple observations and uses observation-only input; it never emits real
+mouse clicks.
 
-## Reset mgesture
+## Replay the tutorial
 
-To clear mgesture user configuration, calibration and tutorial state, recordings, cached data, and logs under its platform directories:
-
-```sh
-mgesture --reset
-```
-
-Reset asks for confirmation by default. For deliberate non-interactive use:
+Practice again without deleting calibration or settings:
 
 ```sh
-mgesture --reset --yes
+mgesture tutorial
 ```
 
-After reset, `mgesture` shows the first-run tutorial again. Reset does not uninstall mgesture or remove bundled application files.
+Use `mgesture tutorial --hand left` or `--hand right` for a one-session hand override. Use
+`--mirror auto`, `--mirror on`, or `--mirror off` to retry the camera handedness interpretation.
 
-## Update
+## Update mgesture
 
-Check for a newer release without installing it:
-
-```sh
-mgesture update --check
-```
-
-Install the latest release for the current operating system and architecture:
+Updates are explicit and target the latest stable release for the current native platform:
 
 ```sh
 mgesture update
 ```
 
-Updating requires network access and keeps your configuration, calibration, and tutorial state.
+Only check for an update without downloading it:
+
+```sh
+mgesture update --check
+```
+
+The updater verifies the target manifest and SHA-256 checksum, stages and self-tests the new
+release, and activates it transactionally. Configuration, calibration, hand selection, and
+onboarding state are preserved. A failed update leaves the current installation unchanged.
+
+## Reset mgesture
+
+Reset clears mgesture user state—configuration, calibration, preferences, onboarding state,
+recordings, cache, and logs—without uninstalling the application:
+
+```sh
+mgesture --reset
+```
+
+Reset asks for confirmation. Preview the exact reset plan without deleting anything:
+
+```sh
+mgesture --reset --dry-run
+```
+
+For deliberate non-interactive use:
+
+```sh
+mgesture --reset --yes
+```
+
+The installed executable, release directories, bundled Python/MediaPipe runtime, native Mojo
+library, and bundled model are protected. After reset, run `mgesture` to see the first-run
+tutorial again. Reset is not uninstall; uninstall removes the installed application.
+
+| Command | Application files | User state |
+|---|---|---|
+| `mgesture --reset` | Preserved | Reset |
+| `mgesture update` | Updated safely | Preserved |
+| Uninstall | Removed | Preserved or purged according to uninstall options |
 
 ## Safety
 
-mgesture starts paused by default, never clicks during calibration or onboarding, and releases held buttons on pause, hand loss, camera failure, exceptions, signals, and normal exit. Keep the configured shortcut available for pausing; use Q/Escape in the preview or Ctrl+C in the terminal to exit. Camera frames stay local and are not saved or uploaded by default.
+mgesture starts paused, never clicks during onboarding or calibration, and releases held buttons
+on pause, hand loss, camera failure, exceptions, signals, and normal exit. Keep the configured
+pause shortcut available as an emergency stop. Camera frames stay local and are not saved or
+uploaded by default.
 
 ## Linux
 
-Linux X11 uses the native XTest/pynput path and discovers the X11 monitor layout through `xrandr`. Linux Wayland uses `/dev/uinput` for relative pointer events; grant the required device permission as described in [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md). The application reports actionable permission and camera errors.
+Linux X11 uses the native XTest/pynput path. Linux Wayland uses the supported relative-input
+backend and may require `/dev/uinput` permission. See [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md)
+for technology-specific setup and diagnostics.
 
 ## macOS
 
-Grant Camera and Accessibility permission to the terminal or application. Quartz coordinates use logical display points, including negative coordinates for a monitor positioned left of the primary display.
+Grant Camera and Accessibility permission to the terminal or application. Pointer coordinates use
+logical display points, including negative coordinates for a monitor positioned left of primary.
 
 ## Windows
 
-The standalone package is native for x86_64 and ARM64 Windows. It uses `SendInput`, enables per-monitor DPI awareness, and maps the Windows virtual desktop, including negative monitor coordinates. WSL is not supported.
+The standalone package is native for x86_64 and ARM64 Windows. It uses `SendInput`, enables
+per-monitor DPI awareness, and maps the virtual desktop, including negative monitor coordinates.
+WSL is not supported.
 
 ## Standalone platforms
 
@@ -138,24 +176,44 @@ The standalone package is native for x86_64 and ARM64 Windows. It uses `SendInpu
 | Windows | x86_64 | Yes | Yes (MediaPipe 0.10.35) | Yes | Yes |
 | Windows | ARM64 | Yes | Yes (MediaPipe 0.10.35) | Yes | Yes |
 
-All six standalone targets include the same canonical Mojo source, a native Mojo engine, and the Python fallback. Camera, Accessibility, and real-pointer behavior still need manual hardware validation.
+All six standalone targets include the canonical Mojo source, a target-native Mojo engine, the
+Python fallback, a verified model, checksums, a release manifest, an SBOM, and provenance
+metadata. Camera and real-pointer behavior still require manual hardware validation.
 
 ## Troubleshooting
 
-If startup cannot access a camera, input backend, compute option, or operating-system permission, run:
+If startup cannot access a camera, input backend, compute option, or operating-system permission:
 
 ```sh
 mgesture doctor
 mgesture list-cameras
 ```
 
-For local developer fixtures, use the explicit opt-in landmark recorder:
+### mgesture detects the wrong hand
+
+Replay the tutorial and confirm the physical hand shown by the preview:
+
+```sh
+mgesture tutorial
+```
+
+For a one-session diagnostic override, try `mgesture --mirror on` or `mgesture --mirror off`.
+Preview mirroring and physical-hand interpretation are independent.
+
+### Scroll gesture is not detected
+
+Raise only index and middle, relax or fold ring and pinky, do not make a deliberate thumb pinch,
+wait for **Scroll mode active**, and move the whole hand rather than only the fingertips. If it
+still needs tuning, run `mgesture calibrate`.
+
+For developer-only, privacy-safe landmark recordings:
 
 ```sh
 mgesture record-landmarks --developer --output ./recordings/hand.jsonl
 ```
 
-It writes timestamped landmarks only, never camera images, and never sends data anywhere. Landmark recordings can still reveal behavioral information and should be treated as user data.
+Recordings contain landmarks rather than camera frames, but they can still reveal behavioral
+information and should be treated as user data. Nothing is uploaded.
 
 ## Advanced usage
 
@@ -167,12 +225,15 @@ mgesture run --compute gpu
 mgesture run --engine python
 mgesture run --engine mojo
 mgesture run --hand left
+mgesture run --mirror off
 mgesture list-cameras
 mgesture doctor --json
 mgesture benchmark --engine compare --compute cpu
 ```
 
-Normally, leave engine, compute, camera, backend, and profile selection at their safe `auto`/balanced defaults. Configuration is available with `mgesture config show`, `mgesture config path`, and `mgesture config write-example`.
+Normally leave engine, compute, camera, backend, profile, and mirror selection at their safe
+automatic defaults. Configuration can be inspected with `mgesture config show` and
+`mgesture config path`.
 
 ## Development
 
@@ -187,6 +248,6 @@ pixi run mojo-build
 pixi run mojo-test
 ```
 
-The model is downloaded only by the explicit `mgesture model install` command and stored in the OS cache. Standalone releases bundle a verified model, native Mojo engine, Python fallback, checksums, manifest, SBOM, and provenance metadata for six native targets.
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/GESTURES.md](docs/GESTURES.md), [docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md), [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md), and [docs/PRIVACY.md](docs/PRIVACY.md) for engineering and platform details.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/GESTURES.md](docs/GESTURES.md),
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md),
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md), and [docs/PRIVACY.md](docs/PRIVACY.md).

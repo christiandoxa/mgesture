@@ -7,6 +7,9 @@
 - macOS backend failure: grant Camera and Accessibility permissions to the terminal/app.
 - `--engine mojo` failure: run `pixi run mojo-build`; use `--engine python` when the current platform/bindings are unavailable.
 - `--compute gpu` failure: use `mgesture doctor --json` to see hardware, MediaPipe delegate, and driver status. `--compute auto` falls back once to CPU.
+- Wrong physical hand: replay `mgesture tutorial` to confirm the hand shown by the camera, or try `mgesture --mirror on` and `mgesture --mirror off` for a one-session inference-orientation override. Preview mirroring is independent.
+- Scroll is not detected: raise index and middle, relax or fold ring and pinky, keep the thumb out of a deliberate pinch, hold until `Scroll mode active`, then move the whole palm rather than only the fingertips.
+- Reset safely with `mgesture --reset --dry-run` to inspect the mutable paths. `mgesture --reset` preserves the installed executable and bundled release; `mgesture update` preserves user data while replacing the application transactionally.
 
 For local developer fixtures, use the opt-in command `mgesture record-landmarks --developer --output ./recordings/hand.jsonl`. It writes timestamped landmark JSON lines only; it never writes camera images or sends data anywhere.
 

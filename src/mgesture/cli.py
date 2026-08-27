@@ -226,7 +226,7 @@ def _run_application(args: argparse.Namespace) -> int:
         )
         configure_logging(config.log_level)
         if not onboarding_completed():
-            tutorial_status = run_tutorial(config)
+            tutorial_status = run_tutorial(config, persist_path=args.config)
             if tutorial_status:
                 return tutorial_status
         armed_override = True if args.armed else None
@@ -308,7 +308,10 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(result, indent=2))
         raise SystemExit(0 if result["passed"] else 1)
     if args.command == "update":
-        raise SystemExit(run_update(args.check))
+        try:
+            raise SystemExit(run_update(args.check))
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise SystemExit(f"mgesture update: {exc}") from exc
     if args.command == "run":
         if args.global_engine and args.engine is None:
             args.engine = args.global_engine

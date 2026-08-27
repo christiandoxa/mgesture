@@ -39,7 +39,7 @@ pyobjc-framework-Quartz = ">=10,<13"
 
 [tasks]
 setup = "python -m mgesture model install"
-run = "python -m mgesture run"
+run = "python -m mgesture"
 doctor = "python -m mgesture doctor"
 test = "pytest -q"
 lint = "ruff check src tests scripts"
