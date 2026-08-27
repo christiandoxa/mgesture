@@ -50,6 +50,7 @@ def record_landmarks(
             config.vision.tracking_confidence,
             "cpu",
             config.vision.handedness_mirrored_input,
+            config.vision.hand_selection,
         ) as landmarker,
     ):
         with output.open("x", encoding="utf-8") as handle:

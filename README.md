@@ -30,11 +30,11 @@ On the first launch, mgesture opens a short safe tutorial. It teaches pointer mo
 
 ## How to use mgesture
 
-Use your right hand. The preview shows the active camera region and current state.
+Use your right hand by default. Select another physical hand with `mgesture run --hand left`, `--hand either`, or `--hand auto`. The preview shows the active camera region, selected hand, and current state.
 
 | Mouse action | Hand gesture |
 |---|---|
-| Move cursor | Move your right index finger |
+| Move cursor | Move your selected hand's index finger |
 | Left click | Pinch thumb and index finger, then release |
 | Hold | Keep thumb and index finger pinched |
 | Drag and drop | Keep the left pinch held while moving |
@@ -46,7 +46,7 @@ Use your right hand. The preview shows the active camera region and current stat
 
 ## First run
 
-The first time you run `mgesture`, an interactive tutorial asks you to show your right hand and practice each gesture. It uses the real camera and canonical gesture engine, but a fake input backend: tutorial practice cannot move or click the real mouse. Press `K` to skip; skipping marks onboarding complete. If you stop before completion, the tutorial runs again next time.
+The first time you run `mgesture`, an interactive tutorial asks you to show the selected physical hand and practice each gesture. It uses the real camera and canonical gesture engine, but a fake input backend: tutorial practice cannot move or click the real mouse. Press `K` to skip; skipping marks onboarding complete. If you stop before completion, the tutorial runs again next time.
 
 Want to practice again?
 
@@ -137,6 +137,7 @@ mgesture run --compute cpu
 mgesture run --compute gpu
 mgesture run --engine python
 mgesture run --engine mojo
+mgesture run --hand left
 mgesture list-cameras
 mgesture doctor --json
 mgesture benchmark --engine compare --compute cpu

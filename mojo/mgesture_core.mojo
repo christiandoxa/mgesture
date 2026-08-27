@@ -86,6 +86,7 @@ struct GestureEngine(Copyable, Movable, Writable):
     var armed: Bool
     var state: Int32
     var held: Int32
+    var active_hand: Int32
     var down_candidate: Int32
     var down_since_ms: Int64
     var release_since_ms: Int64
@@ -115,6 +116,7 @@ struct GestureEngine(Copyable, Movable, Writable):
         self.armed = armed != 0
         self.state = STATE_ARMED if self.armed else STATE_PAUSED
         self.held = 0
+        self.active_hand = 0
         self.down_candidate = 0
         self.down_since_ms = 0
         self.release_since_ms = -1
@@ -148,6 +150,7 @@ struct GestureEngine(Copyable, Movable, Writable):
         self.armed = armed != 0
         self.state = STATE_ARMED if self.armed else STATE_PAUSED
         self.held = 0
+        self.active_hand = 0
         self.down_candidate = 0
         self.down_since_ms = 0
         self.release_since_ms = -1
@@ -190,6 +193,7 @@ struct GestureEngine(Copyable, Movable, Writable):
     def reset_internal(mut self) -> MojoAction:
         var button = self.held
         self.held = 0
+        self.active_hand = 0
         self.reset_transient()
         self.state = STATE_ARMED if self.armed else STATE_PAUSED
         if button != 0:
@@ -200,6 +204,7 @@ struct GestureEngine(Copyable, Movable, Writable):
         var button = self.held
         self.armed = value != 0
         self.held = 0
+        self.active_hand = 0
         self.reset_transient()
         self.state = STATE_ARMED if self.armed else STATE_PAUSED
         if button != 0 and not self.armed:
@@ -306,8 +311,8 @@ struct GestureEngine(Copyable, Movable, Writable):
             return Self.result(ACTION_MOVE, out_x, out_y, 0, self.state)
         return Self.result(ACTION_NONE, out_x, out_y, 0, self.state)
 
-    def process(mut self, landmarks: Pointer[mut=True, Float32, MutAnyOrigin], timestamp_ms: Int64, right_hand: Int32, confidence: Float64) -> MojoAction:
-        var valid = right_hand != 0 and confidence == confidence and confidence >= 0.0 and confidence <= 1.0 and confidence >= self.config.handedness_confidence
+    def process(mut self, landmarks: Pointer[mut=True, Float32, MutAnyOrigin], timestamp_ms: Int64, hand_selected: Int32, confidence: Float64) -> MojoAction:
+        var valid = hand_selected != 0 and confidence == confidence and confidence >= 0.0 and confidence <= 1.0 and confidence >= self.config.handedness_confidence
         if valid:
             valid = Self.valid_landmarks(landmarks)
         if not valid:
@@ -315,9 +320,20 @@ struct GestureEngine(Copyable, Movable, Writable):
                 self.reset_transient()
                 self.invalid_since_ms = timestamp_ms
             if timestamp_ms - self.invalid_since_ms >= self.config.hand_loss_timeout_ms:
+                self.active_hand = 0
                 return self.reset_internal()
             return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
 
+        if self.active_hand != 0 and self.active_hand != hand_selected:
+            var button = self.held
+            self.held = 0
+            self.reset_transient()
+            self.active_hand = hand_selected
+            self.state = STATE_ARMED if self.armed else STATE_PAUSED
+            if button != 0:
+                return Self.result_after(ACTION_BUTTON_UP, 0.0, 0.0, button, self.state)
+            return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+        self.active_hand = hand_selected
         self.invalid_since_ms = -1
         if not self.initialized:
             self.reacquire_since_ms = timestamp_ms
@@ -524,11 +540,11 @@ def mgesture_mojo_engine_process(
     engine: Pointer[mut=True, GestureEngine, MutAnyOrigin],
     landmarks: Pointer[mut=True, Float32, MutAnyOrigin],
     timestamp_ms: Int64,
-    right_hand: Int32,
+    hand_selected: Int32,
     confidence: Float64,
     output: Pointer[mut=True, MojoAction, MutAnyOrigin],
 ) abi("C") -> Int32:
-    output[] = engine[].process(landmarks, timestamp_ms, right_hand, confidence)
+    output[] = engine[].process(landmarks, timestamp_ms, hand_selected, confidence)
     return 0
 
 

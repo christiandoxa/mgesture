@@ -6,7 +6,10 @@ from .models import (
     Button,
     EngineConfig,
     GestureState,
+    Handedness,
+    HandSelection,
     LandmarkFrame,
+    PhysicalHand,
 )
 from .python_engine import PythonGestureEngine
 
@@ -18,7 +21,10 @@ __all__ = [
     "EngineConfig",
     "EngineUnavailableError",
     "GestureState",
+    "HandSelection",
+    "Handedness",
     "LandmarkFrame",
+    "PhysicalHand",
     "PythonGestureEngine",
     "create_engine",
 ]

@@ -37,6 +37,7 @@ def engine_config(config: AppConfig, backend: MouseBackend) -> EngineConfig:
         screen_height=height,
         mirror=config.camera.mirror,
         handedness_confidence=config.vision.handedness_confidence,
+        hand_selection=config.vision.hand_selection,
         **{
             field: getattr(config.gesture, field)
             for field in (
@@ -228,6 +229,7 @@ class Application:
                     self.config.vision.tracking_confidence,
                     "gpu" if self.compute_plan.inference == "mediapipe_gpu" else "cpu",
                     self.config.vision.handedness_mirrored_input,
+                    self.config.vision.hand_selection,
                 )
             except Exception as exc:
                 if self.compute_request != "auto":
@@ -245,6 +247,7 @@ class Application:
                     self.config.vision.tracking_confidence,
                     "cpu",
                     self.config.vision.handedness_mirrored_input,
+                    self.config.vision.hand_selection,
                 )
             cv2 = None
             if self.preview:
@@ -331,6 +334,7 @@ class Application:
                         self.config.vision.tracking_confidence,
                         "cpu",
                         self.config.vision.handedness_mirrored_input,
+                        self.config.vision.hand_selection,
                     )
                     continue
                 preprocess_ms = (time.perf_counter_ns() - preprocess_start) / 1_000_000
@@ -340,6 +344,8 @@ class Application:
                 if result.timestamp_ms <= last_result_timestamp:
                     continue
                 last_result_timestamp = result.timestamp_ms
+                if getattr(result, "hand_changed", False):
+                    self._reset_input("hand switch")
                 detected = result.hand
                 if detected is None:
                     frame = LandmarkFrame(
@@ -364,6 +370,7 @@ class Application:
                 total_ms = time.monotonic_ns() / 1_000_000 - result.timestamp_ms
                 if cv2 is not None:
                     image = captured.image
+                    # Preview/control mirroring is independent from MediaPipe input mirroring.
                     if self.config.camera.mirror:
                         image = cv2.flip(image, 1)
                         if display_landmarks is not None:
@@ -373,6 +380,7 @@ class Application:
                             )
                     lines = [
                         f"state: {batch.state.value}",
+                        f"hand: {frame.handedness} | selection: {self.config.vision.hand_selection.value}",
                         f"compute: {self.compute_plan.inference} | gesture: {self.compute_plan.gesture}",
                         f"engine: {getattr(self.engine, 'name', '?')} | backend: {self.backend.name}",
                         f"camera: {camera.actual_width}x{camera.actual_height}@{camera.actual_fps:.1f} "
@@ -382,7 +390,7 @@ class Application:
                         f"index pinch: {batch.diagnostics.get('index_pinch', '-')}",
                         f"middle pinch: {batch.diagnostics.get('middle_pinch', '-')}",
                         f"preprocess: {preprocess_ms:.2f}ms inference: {landmarker.last_inference_ms or 0.0:.2f}ms gesture: {gesture_ms:.2f}ms input: {dispatch_ms:.2f}ms total: {total_ms:.2f}ms",
-                        "warning: low confidence/no right hand" if not hand_tracked else "",
+                        "warning: low confidence/no selected hand" if not hand_tracked else "",
                         "SPACE arm/pause | Q/Esc emergency stop",
                     ]
                     cv2.imshow(

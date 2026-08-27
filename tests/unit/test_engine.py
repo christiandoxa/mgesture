@@ -3,7 +3,14 @@ from __future__ import annotations
 import math
 import random
 
-from mgesture.engine import Button, EngineConfig, GestureState, LandmarkFrame, PythonGestureEngine
+from mgesture.engine import (
+    Button,
+    EngineConfig,
+    GestureState,
+    HandSelection,
+    LandmarkFrame,
+    PythonGestureEngine,
+)
 from mgesture.engine.python_engine import OneEuroFilter
 
 
@@ -98,6 +105,45 @@ def test_left_pinch_has_one_down_and_one_up():
     assert [action.button for action in batch.actions if action.type.value == "button_up"] == [
         Button.LEFT
     ]
+
+
+def test_left_physical_hand_uses_canonical_gesture_mapping():
+    gesture = engine(hand_selection=HandSelection.LEFT)
+    actions = []
+    for timestamp, pose in ((0, "left"), (80, "left"), (100, None), (140, None)):
+        actions.extend(gesture.process(frame(timestamp, hand(pinch=pose), "Left")).actions)
+
+    assert [(action.type.value, action.button) for action in actions if action.button] == [
+        ("button_down", Button.LEFT),
+        ("button_up", Button.LEFT),
+    ]
+
+
+def test_left_and_right_hands_share_pointer_mapping():
+    right = engine(hand_selection=HandSelection.RIGHT).process(
+        frame(0, hand(index=(0.2, 0.3)), "Right")
+    )
+    left = engine(hand_selection=HandSelection.LEFT).process(
+        frame(0, hand(index=(0.2, 0.3)), "Left")
+    )
+
+    right_move = next(action for action in right.actions if action.type.value == "move_absolute")
+    left_move = next(action for action in left.actions if action.type.value == "move_absolute")
+    assert (left_move.x, left_move.y) == (right_move.x, right_move.y)
+
+
+def test_either_hand_switch_releases_old_button_before_new_hand():
+    gesture = engine(hand_selection=HandSelection.EITHER)
+    gesture.process(frame(0, hand(pinch="left"), "Right"))
+    gesture.process(frame(80, hand(pinch="left"), "Right"))
+
+    switched = gesture.process(frame(120, hand(pinch="left"), "Left"))
+
+    assert [(action.type.value, action.button) for action in switched.actions if action.button] == [
+        ("button_up", Button.LEFT)
+    ]
+    assert switched.diagnostics["hand_switched"] is True
+    assert gesture._held is None
 
 
 def test_sustained_left_pinch_holds_while_moving():

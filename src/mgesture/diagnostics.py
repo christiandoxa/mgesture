@@ -203,6 +203,8 @@ def collect_checks(
                     config.vision.presence_confidence,
                     config.vision.tracking_confidence,
                     "gpu",
+                    config.vision.handedness_mirrored_input,
+                    config.vision.hand_selection,
                 )
                 probe.close()
                 gpu_runtime_ok = True

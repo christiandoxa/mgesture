@@ -38,6 +38,23 @@ def test_zero_argument_startup_reuses_run_path(monkeypatch: pytest.MonkeyPatch) 
         assert getattr(calls[0], name) == getattr(calls[1], name)
 
 
+def test_run_hand_selection_reaches_application(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = []
+
+    class Application:
+        def __init__(self, config, *args):
+            captured.append(config.vision.hand_selection)
+
+        def run(self):
+            return 0
+
+    monkeypatch.setattr(cli, "Application", Application)
+    monkeypatch.setattr(cli, "onboarding_completed", lambda: True)
+
+    assert cli._run_application(_parser().parse_args(["run", "--hand", "left"])) == 0
+    assert str(captured[0]) == "left"
+
+
 def test_reset_requires_confirmation_for_noninteractive_input(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
     with pytest.raises(SystemExit) as result:

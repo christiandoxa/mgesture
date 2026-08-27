@@ -124,7 +124,7 @@ def benchmark_mediapipe(compute: str, frames: int = 30) -> dict[str, object]:
         options = vision.HandLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path=str(model), delegate=delegate),
             running_mode=vision.RunningMode.IMAGE,
-            num_hands=1,
+            num_hands=2,
         )
         image = mp.Image(
             image_format=mp.ImageFormat.SRGB,

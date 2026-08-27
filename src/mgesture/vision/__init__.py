@@ -8,7 +8,7 @@ from .camera import (
     select_camera_index,
 )
 from .hand_landmarker import HandLandmarker, HandLandmarkerError
-from .landmarks import DetectedHand, LandmarkResult
+from .landmarks import DetectedHand, LandmarkResult, canonical_physical_hand
 from .model_manager import (
     available_model,
     bundled_model_path,
@@ -27,6 +27,7 @@ __all__ = [
     "select_camera_index",
     "DetectedHand",
     "LandmarkResult",
+    "canonical_physical_hand",
     "available_model",
     "bundled_model_path",
     "HandLandmarker",

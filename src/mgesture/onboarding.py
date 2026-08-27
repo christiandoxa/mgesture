@@ -12,8 +12,11 @@ from .vision import Camera, HandLandmarker, available_model, select_camera_index
 from .vision.overlay import draw_overlay
 
 _STEPS = (
-    ("Right hand", "Show your right hand to the camera."),
-    ("Move the pointer", "Move your right index finger through the left, center, and right areas."),
+    ("Selected hand", "Show your selected physical hand to the camera."),
+    (
+        "Move the pointer",
+        "Move your selected hand's index finger through the left, center, and right areas.",
+    ),
     ("Left click", "Pinch your thumb and index finger together, then release."),
     ("Hold and drag", "Keep the thumb-index pinch held while moving, then release."),
     ("Right click", "Pinch your thumb and middle finger together, then release."),
@@ -78,6 +81,8 @@ def run_tutorial(config: AppConfig) -> int:
     calibrate_after = False
     completed = False
     last_success = ""
+    selected_hand = config.vision.hand_selection.value
+    selected_hand_label = selected_hand if selected_hand in ("left", "right") else "selected"
 
     print(
         "Welcome to mgesture. This short tutorial uses simulated input only; it cannot move or click your real mouse."
@@ -98,6 +103,7 @@ def run_tutorial(config: AppConfig) -> int:
                 config.vision.tracking_confidence,
                 "cpu",
                 config.vision.handedness_mirrored_input,
+                config.vision.hand_selection,
             ) as landmarker,
         ):
             while True:
@@ -136,7 +142,7 @@ def run_tutorial(config: AppConfig) -> int:
                         else:
                             progress["right_frames"] = 0
                         if progress.get("right_frames", 0) >= 5:
-                            last_success = "✓ Right hand detected"
+                            last_success = "✓ Selected hand detected"
                             step = _advance(step, progress)
                     elif step == 1:
                         for event in events:
@@ -191,7 +197,7 @@ def run_tutorial(config: AppConfig) -> int:
 
                 if step >= len(_STEPS):
                     lines = [
-                        "Move pointer: right index finger | Left click: thumb + index",
+                        "Move pointer: selected hand's index finger | Left click: thumb + index",
                         "Hold/drag: keep left pinch | Right click: thumb + middle",
                         "Scroll: two-finger pose | Pause/resume: configured shortcut or Space",
                         "Q/Escape or Ctrl+C exits safely. Press C to calibrate, or any other key to start.",
@@ -212,9 +218,9 @@ def run_tutorial(config: AppConfig) -> int:
                     if last_success:
                         lines.insert(2, last_success)
                     if step == 0 and batch.diagnostics.get("valid_hand") is not True:
-                        lines.append("Waiting for your right hand...")
+                        lines.append(f"Waiting for your {selected_hand_label} hand...")
                     elif step == 0:
-                        lines.append("Right hand detected")
+                        lines.append(f"{selected_hand_label.title()} hand detected")
 
                 overlay = draw_overlay(
                     captured.image,

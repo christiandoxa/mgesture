@@ -81,7 +81,7 @@ struct PythonGestureEngine(Movable, Writable):
         self_ptr: Pointer[mut=True, PythonGestureEngine, MutAnyOrigin],
         landmarks: PythonObject,
         timestamp_ms: PythonObject,
-        right_hand: PythonObject,
+        hand_selected: PythonObject,
         confidence: PythonObject,
     ) raises -> PythonObject:
         var values: InlineArray[Float32, 63] = InlineArray[Float32, 63](uninitialized=True)
@@ -91,7 +91,7 @@ struct PythonGestureEngine(Movable, Writable):
         var action = self_ptr[].engine.process(
             pointer,
             Int64(py=timestamp_ms),
-            Int32(1) if Bool(py=right_hand) else Int32(0),
+            Int32(py=hand_selected),
             Float64(py=confidence),
         )
         return Self.python_result(action)

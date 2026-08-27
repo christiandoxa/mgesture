@@ -60,7 +60,7 @@ def calibrate(
         raise RuntimeError("hand model is not installed; run `mgesture model install`")
     print(
         "Calibration is safe: observation only; no real mouse events are emitted. "
-        "Hold an open hand, press O, then pinch index or middle, press P. "
+        f"Hold an open {config.vision.hand_selection.value} hand, press O, then pinch index or middle, press P. "
         "Press S to save, Q/Esc to cancel."
     )
     observer = PythonGestureEngine(EngineConfig(activation_gesture=False))
@@ -85,6 +85,7 @@ def calibrate(
                 config.vision.tracking_confidence,
                 "cpu",
                 config.vision.handedness_mirrored_input,
+                config.vision.hand_selection,
             ) as landmarker,
         ):
             while True:
@@ -104,7 +105,6 @@ def calibrate(
                     detected = result.hand
                     if (
                         detected is not None
-                        and detected.frame.handedness.lower() == "right"
                         and detected.frame.handedness_confidence
                         >= config.vision.handedness_confidence
                     ):
@@ -147,7 +147,7 @@ def calibrate(
                     collecting = True
                 elif key == ord("s"):
                     if len(open_samples) < minimum_samples or len(pinch_samples) < minimum_samples:
-                        print("Need more valid right-hand samples before saving.")
+                        print("Need more valid selected-hand samples before saving.")
                         continue
                     try:
                         down, release = calibrated_pinch_thresholds(open_samples, pinch_samples)

@@ -5,13 +5,14 @@ Python hosts the portable application because camera capture, MediaPipe Tasks, O
 ```text
 Camera (bounded newest-frame buffer, reconnect/backoff)
   -> MediaPipe Hand Landmarker LIVE_STREAM (bounded pending/results)
+  -> canonical physical hand selection/lock
   -> newest normalized LandmarkFrame
   -> Python or Mojo GestureEngine
   -> ActionBatch
   -> MouseBackend
 ```
 
-The engine owns filtering, normalized palm-scale pinch distances, hysteresis, debounce, hand-loss cleanup, reacquisition, scroll accumulation, pause state, and action ordering. Camera and preview never dispatch mouse events. The input dispatcher translates typed actions and calls the shared idempotent `release_all()` safety contract.
+The vision boundary swaps MediaPipe's label only when the submitted image is unmirrored, then selects one canonical physical hand. `camera.mirror` mirrors preview pixels and pointer X mapping independently. The engine owns filtering, normalized palm-scale pinch distances, hysteresis, debounce, hand-loss and hand-switch cleanup, reacquisition, scroll accumulation, pause state, and action ordering. Camera and preview never dispatch mouse events. The input dispatcher translates typed actions and calls the shared idempotent `release_all()` safety contract.
 
 `mgesture` and `mgesture run` share one startup path. That path checks the platform user-data onboarding state; a missing completion flag runs `onboarding.run_tutorial` with the production Python gesture engine and a fake input dispatcher. Only completed or intentionally skipped onboarding starts the real application backend. `mgesture --reset` owns user-state deletion through `config.reset_user_data` and never targets bundled runtime files.
 

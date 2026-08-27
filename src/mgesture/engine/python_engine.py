@@ -4,7 +4,15 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .models import Action, ActionBatch, Button, EngineConfig, GestureState, LandmarkFrame
+from .models import (
+    Action,
+    ActionBatch,
+    Button,
+    EngineConfig,
+    GestureState,
+    LandmarkFrame,
+    PhysicalHand,
+)
 
 _LANDMARK_COUNT = 63
 _LANDMARK_ABS_LIMIT = 2.0
@@ -128,6 +136,7 @@ class PythonGestureEngine:
         self._open_since: float | None = None
         self._last_toggle: float = -math.inf
         self._last_pointer: tuple[float, float] | None = None
+        self._active_hand: PhysicalHand | None = None
 
     def _state_action(self, state: GestureState, actions: list[Action]) -> None:
         if self.state != state:
@@ -150,6 +159,7 @@ class PythonGestureEngine:
             self._release_held(actions)
         self.armed = armed
         self._reset_transient()
+        self._active_hand = None
         self._state_action(GestureState.ARMED if armed else GestureState.PAUSED, actions)
         return self._result(actions, {"reason": "armed" if armed else "paused"})
 
@@ -157,6 +167,7 @@ class PythonGestureEngine:
         actions: list[Action] = []
         self._release_held(actions)
         self._reset_transient()
+        self._active_hand = None
         self._state_action(GestureState.ARMED if self.armed else GestureState.PAUSED, actions)
         return self._result(actions, {"reason": reason})
 
@@ -332,10 +343,10 @@ class PythonGestureEngine:
     def process(self, frame: LandmarkFrame) -> ActionBatch:
         now = frame.timestamp_ms / 1000.0
         actions: list[Action] = []
+        physical_hand = frame.physical_hand
         try:
             valid = (
-                isinstance(frame.handedness, str)
-                and frame.handedness.casefold() == "right"
+                self.config.hand_selection.accepts(physical_hand)
                 and math.isfinite(frame.handedness_confidence)
                 and 0.0 <= frame.handedness_confidence <= 1.0
                 and self._valid_landmarks(frame.landmarks)
@@ -355,11 +366,28 @@ class PythonGestureEngine:
             if now - self._invalid_since >= self.config.hand_loss_timeout_ms / 1000.0:
                 self._release_held(actions)
                 self._reset_transient()
+                self._active_hand = None
                 self._state_action(
                     GestureState.ARMED if self.armed else GestureState.PAUSED, actions
                 )
             return self._result(actions, {"valid_hand": False, "hand_loss": True})
 
+        if self._active_hand is not None and physical_hand is not self._active_hand:
+            self._release_held(actions)
+            self._reset_transient()
+            self._active_hand = physical_hand
+            self._state_action(GestureState.ARMED if self.armed else GestureState.PAUSED, actions)
+            return self._result(
+                actions,
+                {
+                    "valid_hand": True,
+                    "hand_switched": True,
+                    "hand": str(frame.handedness),
+                    "hand_selection": self.config.hand_selection.value,
+                },
+            )
+
+        self._active_hand = physical_hand
         self._invalid_since = None
         if self._reacquire_since is None:
             self._reacquire_since = now
@@ -370,6 +398,8 @@ class PythonGestureEngine:
         reacquiring = now - self._reacquire_since < self.config.reacquisition_ms / 1000.0
         diagnostics: dict[str, object] = {
             "valid_hand": True,
+            "hand": str(frame.handedness),
+            "hand_selection": self.config.hand_selection.value,
             "reacquiring": reacquiring,
             "index_pinch": measurements.index_pinch,
             "middle_pinch": measurements.middle_pinch,

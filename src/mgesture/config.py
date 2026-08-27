@@ -13,6 +13,8 @@ from typing import Any
 
 from platformdirs import user_cache_dir, user_config_dir, user_data_dir, user_log_dir
 
+from .engine.models import HandSelection
+
 STATE_SCHEMA_VERSION = 1
 
 
@@ -40,6 +42,14 @@ class VisionConfig:
     tracking_confidence: float = 0.65
     model_path: str | None = None
     handedness_mirrored_input: bool = False
+    hand_selection: HandSelection = HandSelection.RIGHT
+
+    def __post_init__(self) -> None:
+        try:
+            selection = HandSelection.coerce(self.hand_selection)
+        except ValueError as exc:
+            raise ValueError("vision.hand_selection must be right, left, either, or auto") from exc
+        object.__setattr__(self, "hand_selection", selection)
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +411,10 @@ def validate(config: AppConfig) -> AppConfig:
         value = getattr(config.vision, name)
         if not 0.0 <= value <= 1.0:
             errors.append(f"vision.{name} must be between 0 and 1")
+    try:
+        HandSelection.coerce(config.vision.hand_selection)
+    except ValueError:
+        errors.append("vision.hand_selection must be right, left, either, or auto")
     margins = (
         config.gesture.active_left,
         config.gesture.active_right,
@@ -454,6 +468,8 @@ def with_overrides(config: AppConfig, **values: Any) -> AppConfig:
             result = replace(result, input=replace(result.input, **{name: value}))
         elif name in {field.name for field in fields(ComputeConfig)}:
             result = replace(result, compute=replace(result.compute, **{name: value}))
+        elif name in {field.name for field in fields(VisionConfig)}:
+            result = replace(result, vision=replace(result.vision, **{name: value}))
         elif name in {field.name for field in fields(PerformanceConfig)}:
             result = replace(result, performance=replace(result.performance, **{name: value}))
         elif name in {field.name for field in fields(DisplayConfig)}:

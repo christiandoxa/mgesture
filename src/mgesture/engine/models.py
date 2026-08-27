@@ -10,6 +10,58 @@ class Button(StrEnum):
     RIGHT = "right"
 
 
+class PhysicalHand(StrEnum):
+    LEFT = "Left"
+    RIGHT = "Right"
+    UNKNOWN = "Unknown"
+
+    @classmethod
+    def coerce(cls, value: object) -> PhysicalHand:
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            normalized = value.casefold()
+            if normalized == "left":
+                return cls.LEFT
+            if normalized == "right":
+                return cls.RIGHT
+            if normalized == "unknown":
+                return cls.UNKNOWN
+        return cls.UNKNOWN
+
+
+class HandSelection(StrEnum):
+    RIGHT = "right"
+    LEFT = "left"
+    EITHER = "either"
+    AUTO = "auto"
+
+    @classmethod
+    def coerce(cls, value: object) -> HandSelection:
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            try:
+                return cls(value.casefold())
+            except ValueError:
+                pass
+        raise ValueError("hand selection must be right, left, either, or auto")
+
+    def accepts(self, hand: PhysicalHand | str) -> bool:
+        physical = PhysicalHand.coerce(hand)
+        if physical not in (PhysicalHand.RIGHT, PhysicalHand.LEFT):
+            return False
+        return (
+            self in (HandSelection.EITHER, HandSelection.AUTO)
+            or (self is HandSelection.RIGHT and physical is PhysicalHand.RIGHT)
+            or (self is HandSelection.LEFT and physical is PhysicalHand.LEFT)
+        )
+
+
+# Keep handedness terminology available to callers while PhysicalHand remains canonical.
+Handedness = PhysicalHand
+
+
 class ActionType(StrEnum):
     MOVE_ABSOLUTE = "move_absolute"
     MOVE_RELATIVE = "move_relative"
@@ -31,7 +83,7 @@ class GestureState(StrEnum):
 class LandmarkFrame:
     timestamp_ms: int
     landmarks: Sequence[float]
-    handedness: str = "Right"
+    handedness: PhysicalHand | str = PhysicalHand.RIGHT
     handedness_confidence: float = 1.0
     width: int = 0
     height: int = 0
@@ -39,6 +91,10 @@ class LandmarkFrame:
     def __post_init__(self) -> None:
         if len(self.landmarks) != 63:
             raise ValueError(f"landmarks must contain 63 values, got {len(self.landmarks)}")
+
+    @property
+    def physical_hand(self) -> PhysicalHand:
+        return PhysicalHand.coerce(self.handedness)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,3 +168,7 @@ class EngineConfig:
     activation_gesture: bool = True
     activation_gesture_ms: int = 1000
     activation_cooldown_ms: int = 1000
+    hand_selection: HandSelection = HandSelection.RIGHT
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "hand_selection", HandSelection.coerce(self.hand_selection))

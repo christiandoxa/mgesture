@@ -24,6 +24,7 @@ from .config import (
     write_config,
 )
 from .diagnostics import DoctorCode, collect_checks, print_report
+from .engine import HandSelection
 from .logging_config import configure_logging
 from .onboarding import run_tutorial
 from .release import run_update
@@ -47,11 +48,24 @@ def _parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="show reset targets without deleting anything"
     )
     parser.add_argument("--engine", dest="global_engine", choices=("auto", "mojo", "python"))
+    parser.add_argument(
+        "--hand",
+        dest="global_hand_selection",
+        choices=tuple(selection.value for selection in HandSelection),
+        help="select the physical hand used for control",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     run = subparsers.add_parser("run", help="start webcam gesture control; starts paused")
     run.add_argument("--camera", type=int)
     run.add_argument("--engine", choices=("auto", "mojo", "python"))
+    run.add_argument(
+        "--hand",
+        "--hand-selection",
+        dest="hand_selection",
+        choices=tuple(selection.value for selection in HandSelection),
+        help="select the physical hand used for control",
+    )
     run.add_argument("--compute", choices=("auto", "gpu", "cpu"))
     run.add_argument("--profile", choices=("performance", "balanced", "efficiency"))
     run.add_argument("--backend", choices=("auto", "fake", "x11", "wayland", "windows", "macos"))
@@ -181,6 +195,8 @@ def _run_application(args: argparse.Namespace) -> int:
             mode=args.compute,
             profile=args.profile,
             monitor=args.monitor,
+            hand_selection=getattr(args, "hand_selection", None)
+            or getattr(args, "global_hand_selection", None),
         )
         configure_logging(config.log_level)
         if not onboarding_completed():

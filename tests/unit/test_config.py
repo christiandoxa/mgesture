@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 from mgesture import config
-from mgesture.config import config_text, load_config, write_config
+from mgesture.config import config_text, load_config, with_overrides, write_config
+from mgesture.engine import HandSelection
 
 
 def test_config_round_trip(tmp_path: Path):
@@ -11,7 +12,21 @@ def test_config_round_trip(tmp_path: Path):
     loaded = load_config(path)
     assert loaded.camera.mirror is True
     assert loaded.compute.mode == "auto"
+    assert loaded.vision.hand_selection is HandSelection.RIGHT
     assert "[performance]" in config_text(loaded)
+
+
+def test_hand_selection_config_round_trip_and_override(tmp_path: Path):
+    path = tmp_path / "config.toml"
+    path.write_text('[vision]\nhand_selection = "left"\n', encoding="utf-8")
+
+    loaded = load_config(path)
+
+    assert loaded.vision.hand_selection is HandSelection.LEFT
+    assert (
+        with_overrides(loaded, hand_selection="either").vision.hand_selection
+        is HandSelection.EITHER
+    )
 
 
 def test_onboarding_state_round_trip(tmp_path: Path, monkeypatch):

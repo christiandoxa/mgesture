@@ -14,7 +14,9 @@ from .models import (
     Button,
     EngineConfig,
     GestureState,
+    HandSelection,
     LandmarkFrame,
+    PhysicalHand,
 )
 
 MOJO_ABI_VERSION = 1
@@ -31,6 +33,13 @@ _STATE_NAMES = {
     3: GestureState.RIGHT_DOWN,
     4: GestureState.SCROLL,
 }
+
+
+def _selected_hand_code(selection: HandSelection, hand: object) -> int:
+    physical = PhysicalHand.coerce(hand)
+    if not selection.accepts(physical):
+        return 0
+    return 1 if physical is PhysicalHand.RIGHT else 2
 
 
 class _NativeConfig(ctypes.Structure):
@@ -182,6 +191,7 @@ class NativeMojoGestureEngine:
             "mgesture_mojo_engine_destroy", ctypes.c_int32, [ctypes.c_void_p]
         )
         self._target = target
+        self._hand_selection = config.hand_selection
         self.armed = armed
         self._state_value = GestureState.ARMED if armed else GestureState.PAUSED
         self._closed = False
@@ -250,7 +260,7 @@ class NativeMojoGestureEngine:
                 self._state,
                 values,
                 frame.timestamp_ms,
-                int(frame.handedness.lower() == "right"),
+                _selected_hand_code(self._hand_selection, frame.handedness),
                 frame.handedness_confidence,
                 ctypes.byref(self._output),
             ),
@@ -293,6 +303,7 @@ class MojoGestureEngine:
         values["armed"] = armed
         self._engine = module.PythonGestureEngine(values)
         self.armed = armed
+        self._hand_selection = config.hand_selection
         self._buffer = array("f", [0.0] * 63)
         self._state_value = GestureState.ARMED if armed else GestureState.PAUSED
 
@@ -328,7 +339,7 @@ class MojoGestureEngine:
         result = self._engine.process(
             self._buffer,
             frame.timestamp_ms,
-            frame.handedness.lower() == "right",
+            _selected_hand_code(self._hand_selection, frame.handedness),
             frame.handedness_confidence,
         )
         return ActionBatch(
