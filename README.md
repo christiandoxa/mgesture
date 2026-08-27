@@ -61,7 +61,7 @@ CI presents both Python and Mojo validation for all six targets. Mojo jobs build
 
 The current version contains a runnable CLI, deterministic Python engine, fake-backend replay, explicit model management, bounded camera/MediaPipe pipeline, Linux X11/Wayland-uinput/Windows/macOS adapters, centralized compute planning, and stable-Mojo build scaffolding. Hardware and cross-platform claims below are intentionally conservative; run `mgesture doctor` on the target machine.
 
-## Zorin OS quick start
+## Linux quick start
 
 ```bash
 curl -fsSL https://pixi.sh/install.sh | bash

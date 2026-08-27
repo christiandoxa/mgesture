@@ -12,9 +12,9 @@ The core section uses identical synthetic landmark frames. The inference section
 
 The end-to-end webcam target is approximately 30 processed FPS with bounded latency, not a universal guarantee. Record machine, OS, resolution, model, engine, compute mode, dropped frames, and CPU/GPU observations when adding measured results here.
 
-## Zorin validation snapshot
+## Linux validation snapshot
 
-Run on 2026-08-25 on Zorin OS 18.1 x86_64, Linux 7.0.0-30, Python 3.11.16, MediaPipe 0.10.35, Mojo 1.0.0, NVIDIA GeForce RTX 3060 12 GB, model SHA-256 `fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1`.
+Historical run on 2026-08-25 on Zorin OS 18.1 x86_64, Linux 7.0.0-30, Python 3.11.16, MediaPipe 0.10.35, Mojo 1.0.0, NVIDIA GeForce RTX 3060 12 GB, model SHA-256 `fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1`.
 
 | Workload | Median | P95 | FPS | CPU process time | Result |
 |---|---:|---:|---:|---:|---|
