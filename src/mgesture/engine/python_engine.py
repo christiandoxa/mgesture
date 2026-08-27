@@ -6,6 +6,10 @@ from dataclasses import dataclass
 
 from .models import Action, ActionBatch, Button, EngineConfig, GestureState, LandmarkFrame
 
+_LANDMARK_COUNT = 63
+_LANDMARK_ABS_LIMIT = 2.0
+_MIN_PALM_SCALE = 1e-4
+
 
 def _distance(landmarks: Sequence[float], first: int, second: int) -> float:
     a = first * 3
@@ -20,6 +24,10 @@ def _distance(landmarks: Sequence[float], first: int, second: int) -> float:
 def _xy(landmarks: Sequence[float], index: int) -> tuple[float, float]:
     offset = index * 3
     return landmarks[offset], landmarks[offset + 1]
+
+
+def _palm_scale(landmarks: Sequence[float]) -> float:
+    return 0.5 * (_distance(landmarks, 0, 9) + _distance(landmarks, 5, 17))
 
 
 class _LowPass:
@@ -67,6 +75,11 @@ class OneEuroFilter:
             self.last = (x, y, timestamp_s)
             return self.x.filter(x, 1.0), self.y.filter(y, 1.0)
         last_x, last_y, last_t = self.last
+        if timestamp_s <= last_t:
+            return (
+                self.x.value if self.x.value is not None else last_x,
+                self.y.value if self.y.value is not None else last_y,
+            )
         dt = max(timestamp_s - last_t, 1e-4)
         raw_dx = (x - last_x) / dt
         raw_dy = (y - last_y) / dt
@@ -160,11 +173,19 @@ class PythonGestureEngine:
         self._open_since = None
         self._last_pointer = None
 
+    @staticmethod
+    def _valid_landmarks(landmarks: Sequence[float]) -> bool:
+        if len(landmarks) != _LANDMARK_COUNT:
+            return False
+        try:
+            return all(
+                math.isfinite(value) and abs(value) <= _LANDMARK_ABS_LIMIT for value in landmarks
+            )
+        except (TypeError, ValueError, OverflowError):
+            return False
+
     def _measure(self, landmarks: Sequence[float]) -> _Measurements:
-        palm_scale = max(
-            1e-6,
-            0.5 * (_distance(landmarks, 0, 9) + _distance(landmarks, 5, 17)),
-        )
+        palm_scale = max(1e-6, _palm_scale(landmarks))
         index_pinch = _distance(landmarks, 4, 8) / palm_scale
         middle_pinch = _distance(landmarks, 4, 12) / palm_scale
         palm_points = (0, 5, 9, 13, 17)
@@ -186,7 +207,9 @@ class PythonGestureEngine:
             palm_y,
             index_x,
             index_y,
-            scroll_pose and middle_pinch > self.config.pinch_release_threshold,
+            scroll_pose
+            and index_pinch > self.config.pinch_release_threshold
+            and middle_pinch > self.config.pinch_release_threshold,
             open_palm,
         )
 
@@ -244,7 +267,7 @@ class PythonGestureEngine:
         if self._down_candidate != button:
             self._down_candidate = button
             self._down_since = now
-            return False
+            return self.config.debounce_ms <= 0
         return (
             self._down_since is not None
             and now - self._down_since >= self.config.debounce_ms / 1000.0
@@ -256,7 +279,7 @@ class PythonGestureEngine:
             return False
         if self._release_since is None:
             self._release_since = now
-            return False
+            return self.config.release_debounce_ms <= 0
         return now - self._release_since >= self.config.release_debounce_ms / 1000.0
 
     def _pointer(self, measurements: _Measurements, timestamp_s: float) -> Action | None:
@@ -265,7 +288,7 @@ class PythonGestureEngine:
         )
         if self._last_pointer is not None:
             last_x, last_y = self._last_pointer
-            if math.hypot(filtered_x - last_x, filtered_y - last_y) < self.config.dead_zone:
+            if math.hypot(filtered_x - last_x, filtered_y - last_y) <= self.config.dead_zone:
                 return None
         self._last_pointer = (filtered_x, filtered_y)
         x = (filtered_x - self.config.active_left) / max(
@@ -293,11 +316,13 @@ class PythonGestureEngine:
             return
         _, last_y = self._scroll_last
         dy = current[1] - last_y
-        self._scroll_last = current
-        if abs(dy) < self.config.scroll_dead_zone:
+        if abs(dy) <= self.config.scroll_dead_zone:
             return
+        direction = 1.0 if dy > 0.0 else -1.0
+        effective_dy = dy - direction * self.config.scroll_dead_zone
+        self._scroll_last = (current[0], current[1] - direction * self.config.scroll_dead_zone)
         self._scroll_remainder += (
-            -dy * self.config.scroll_sensitivity * self.config.scroll_direction
+            -effective_dy * self.config.scroll_sensitivity * self.config.scroll_direction
         )
         steps = math.trunc(self._scroll_remainder)
         if steps:
@@ -307,12 +332,25 @@ class PythonGestureEngine:
     def process(self, frame: LandmarkFrame) -> ActionBatch:
         now = frame.timestamp_ms / 1000.0
         actions: list[Action] = []
-        valid = (
-            frame.handedness.lower() == "right"
-            and frame.handedness_confidence >= self.config.handedness_confidence
-        )
+        try:
+            valid = (
+                isinstance(frame.handedness, str)
+                and frame.handedness.casefold() == "right"
+                and math.isfinite(frame.handedness_confidence)
+                and 0.0 <= frame.handedness_confidence <= 1.0
+                and self._valid_landmarks(frame.landmarks)
+            )
+        except (TypeError, ValueError, OverflowError):
+            valid = False
+        if valid:
+            try:
+                palm_scale = _palm_scale(frame.landmarks)
+                valid = math.isfinite(palm_scale) and palm_scale > _MIN_PALM_SCALE
+            except (TypeError, ValueError, OverflowError):
+                valid = False
         if not valid:
             if self._invalid_since is None:
+                self._reset_transient()
                 self._invalid_since = now
             if now - self._invalid_since >= self.config.hand_loss_timeout_ms / 1000.0:
                 self._release_held(actions)
@@ -320,9 +358,7 @@ class PythonGestureEngine:
                 self._state_action(
                     GestureState.ARMED if self.armed else GestureState.PAUSED, actions
                 )
-            return self._result(
-                actions, {"valid_hand": False, "hand_loss": self._invalid_since is not None}
-            )
+            return self._result(actions, {"valid_hand": False, "hand_loss": True})
 
         self._invalid_since = None
         if self._reacquire_since is None:
@@ -365,7 +401,7 @@ class PythonGestureEngine:
                     actions.append(pointer)
             return self._result(actions, diagnostics)
 
-        # Priority: right pinch, then left pinch, then scroll, then movement.
+        # Right pinch wins frames where both down thresholds are active.
         if self._stable_press(Button.RIGHT, right_pinch, now):
             self._held = Button.RIGHT
             self._down_candidate = None
@@ -388,6 +424,8 @@ class PythonGestureEngine:
                 if self.state != GestureState.SCROLL:
                     self._state_action(GestureState.SCROLL, actions)
                     self._scroll_last = (measurements.palm_x, measurements.palm_y)
+                    self.filter.reset()
+                    self._last_pointer = None
                 self._scroll(measurements, actions)
                 return self._result(actions, diagnostics)
         else:
@@ -395,6 +433,8 @@ class PythonGestureEngine:
             self._scroll_last = None
             self._scroll_remainder = 0.0
             if self.state is GestureState.SCROLL:
+                self.filter.reset()
+                self._last_pointer = None
                 self._state_action(GestureState.ARMED, actions)
 
         pointer = self._pointer(measurements, now)

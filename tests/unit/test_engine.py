@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import math
+import random
+
 from mgesture.engine import Button, EngineConfig, GestureState, LandmarkFrame, PythonGestureEngine
+from mgesture.engine.python_engine import OneEuroFilter
 
 
 def hand(index=(0.45, 0.25), pinch=None, scroll=False, open_palm=False):
@@ -39,6 +43,29 @@ def engine(**overrides):
     values = {"reacquisition_ms": 0, "activation_gesture": False}
     values.update(overrides)
     return PythonGestureEngine(EngineConfig(**values), armed=True)
+
+
+def _scale_hand(points, factor):
+    values = list(points)
+    for point in range(21):
+        offset = point * 3
+        values[offset] = 0.5 + (values[offset] - 0.5) * factor
+        values[offset + 1] = 0.5 + (values[offset + 1] - 0.5) * factor
+        values[offset + 2] *= factor
+    return tuple(values)
+
+
+def _ambiguous_hand():
+    values = list(hand())
+    values[12:15] = (0.50, 0.325, 0.0)
+    return tuple(values)
+
+
+def _palm_offset(points, offset):
+    values = list(points)
+    for point in (0, 5, 9, 13, 17):
+        values[point * 3 + 1] += offset
+    return tuple(values)
 
 
 def test_center_mapping_and_negative_desktop_bounds():
@@ -164,3 +191,185 @@ def test_reacquisition_suppresses_first_pointer_frame():
     assert not any(action.type.value == "move_absolute" for action in first.actions)
     second = gesture.process(frame(120, hand(index=(0.2, 0.2))))
     assert any(action.type.value == "move_absolute" for action in second.actions)
+
+
+def test_one_euro_adapts_to_frame_interval():
+    responses = []
+    for interval in (1 / 60, 1 / 30, 1 / 15):
+        smoother = OneEuroFilter(1.0, 0.007, 1.0)
+        smoother.filter(0.0, 0.0, 0.0)
+        responses.append(smoother.filter(1.0, 1.0, interval)[0])
+    assert responses[0] < responses[1] < responses[2]
+
+
+def test_generated_cursor_jitter_stays_inside_dead_zone():
+    rng = random.Random(20260827)
+    gesture = engine(dead_zone=0.002)
+    moves = []
+    for index in range(120):
+        points = hand(index=(0.45 + rng.uniform(-0.001, 0.001), 0.25 + rng.uniform(-0.001, 0.001)))
+        batch = gesture.process(frame((index // 2) * 33, points))
+        moves.extend(action for action in batch.actions if action.type.value == "move_absolute")
+    assert len(moves) == 1
+
+
+def test_generated_scaled_pinches_keep_one_click_pair():
+    for factor in (0.5, 1.0, 2.0):
+        gesture = engine()
+        points = _scale_hand(hand(pinch="left"), factor)
+        actions = []
+        for timestamp, pinch_points in (
+            (0, points),
+            (80, points),
+            (100, _scale_hand(hand(), factor)),
+            (140, _scale_hand(hand(), factor)),
+        ):
+            actions.extend(gesture.process(frame(timestamp, pinch_points)).actions)
+        assert [(action.type.value, action.button) for action in actions if action.button] == [
+            ("button_down", Button.LEFT),
+            ("button_up", Button.LEFT),
+        ]
+
+
+def test_zero_time_debounce_still_emits_one_press_and_release():
+    gesture = engine(debounce_ms=0, release_debounce_ms=0)
+    down = gesture.process(frame(0, hand(pinch="left")))
+    up = gesture.process(frame(0, hand()))
+    assert [action.button for action in down.actions if action.type.value == "button_down"] == [
+        Button.LEFT
+    ]
+    assert [action.button for action in up.actions if action.type.value == "button_up"] == [
+        Button.LEFT
+    ]
+
+
+def test_generated_short_pinch_pulses_emit_no_false_clicks():
+    rng = random.Random(20260827)
+    gesture = engine()
+    actions = []
+    timestamp = 0
+    for _ in range(24):
+        for _ in range(rng.choice((1, 2))):
+            actions.extend(gesture.process(frame(timestamp, hand(pinch="left"))).actions)
+            timestamp += 30
+        for _ in range(2):
+            actions.extend(gesture.process(frame(timestamp, hand())).actions)
+            timestamp += 30
+    assert not [action for action in actions if action.button]
+
+
+def test_generated_double_click_and_release_jitter_emit_no_duplicates():
+    rng = random.Random(11)
+    gesture = engine()
+    actions = []
+    timestamp = 0
+    for _ in range(2):
+        actions.extend(gesture.process(frame(timestamp, hand(pinch="left"))).actions)
+        timestamp += 80 + rng.choice((0, 10))
+        actions.extend(gesture.process(frame(timestamp, hand(pinch="left"))).actions)
+        timestamp += 10
+        actions.extend(gesture.process(frame(timestamp, hand())).actions)
+        timestamp += 10
+        actions.extend(gesture.process(frame(timestamp, hand(pinch="left"))).actions)
+        timestamp += 10
+        actions.extend(gesture.process(frame(timestamp, hand())).actions)
+        timestamp += 35 + rng.choice((5, 10))
+        actions.extend(gesture.process(frame(timestamp, hand())).actions)
+        timestamp += 50
+    assert [(action.type.value, action.button) for action in actions if action.button] == [
+        ("button_down", Button.LEFT),
+        ("button_up", Button.LEFT),
+        ("button_down", Button.LEFT),
+        ("button_up", Button.LEFT),
+    ]
+
+
+def test_generated_drag_moves_while_held_and_releases_once():
+    gesture = engine()
+    actions = []
+    actions.extend(gesture.process(frame(0, hand(pinch="left"))).actions)
+    actions.extend(gesture.process(frame(80, hand(pinch="left"))).actions)
+    for index in range(1, 7):
+        actions.extend(
+            gesture.process(
+                frame(
+                    80 + index * 35,
+                    hand(index=(0.45 + index * 0.04, 0.25 + index * 0.04), pinch="left"),
+                )
+            ).actions
+        )
+    actions.extend(gesture.process(frame(330, hand())).actions)
+    actions.extend(gesture.process(frame(340, hand(pinch="left"))).actions)
+    actions.extend(gesture.process(frame(360, hand())).actions)
+    actions.extend(gesture.process(frame(400, hand())).actions)
+    button_events = [(action.type.value, action.button) for action in actions if action.button]
+    assert button_events == [
+        ("button_down", Button.LEFT),
+        ("button_up", Button.LEFT),
+    ]
+    assert sum(action.type.value == "move_absolute" for action in actions) >= 3
+
+
+def test_generated_scroll_jitter_stays_in_dead_zone():
+    gesture = engine(scroll_entry_ms=0, scroll_sensitivity=1000, scroll_dead_zone=0.001)
+    actions = []
+    for index in range(120):
+        offset = 0.0008 if index % 2 else -0.0008
+        actions.extend(
+            gesture.process(frame(index * 33, _palm_offset(hand(scroll=True), offset))).actions
+        )
+    assert not [action for action in actions if action.type.value == "scroll"]
+
+
+def test_invalid_landmarks_cancel_pending_click_and_release_held_button():
+    gesture = engine(hand_loss_timeout_ms=100, reacquisition_ms=100)
+    gesture.process(frame(0, hand(pinch="left")))
+    gesture.process(frame(120, hand(pinch="left")))
+    gesture.process(frame(200, hand(pinch="left")))
+    invalid = list(hand())
+    invalid[8 * 3] = math.nan
+    first = gesture.process(frame(220, tuple(invalid)))
+    second = gesture.process(frame(330, tuple(invalid)))
+    assert not [action for action in first.actions if action.button]
+    assert [action.button for action in second.actions if action.type.value == "button_up"] == [
+        Button.LEFT
+    ]
+    assert gesture._held is None
+    reacquired = gesture.process(frame(360, hand()))
+    assert not [action for action in reacquired.actions if action.type.value == "move_absolute"]
+
+
+def test_generated_brief_hand_loss_reacquires_without_duplicate_click():
+    gesture = engine(hand_loss_timeout_ms=250, reacquisition_ms=100)
+    actions = []
+    actions.extend(gesture.process(frame(0, hand(pinch="left"))).actions)
+    actions.extend(gesture.process(frame(120, hand(pinch="left"))).actions)
+    actions.extend(gesture.process(frame(200, hand(pinch="left"))).actions)
+    for timestamp in (220, 320):
+        actions.extend(gesture.process(frame(timestamp, hand(), "Left", 0.99)).actions)
+    actions.extend(gesture.process(frame(340, hand(pinch="left"))).actions)
+    actions.extend(gesture.process(frame(440, hand(pinch="left"))).actions)
+    actions.extend(gesture.process(frame(460, hand())).actions)
+    actions.extend(gesture.process(frame(500, hand())).actions)
+    assert [(action.type.value, action.button) for action in actions if action.button] == [
+        ("button_down", Button.LEFT),
+        ("button_up", Button.LEFT),
+    ]
+
+
+def test_generated_ambiguous_pinch_always_selects_right():
+    gesture = engine()
+    ambiguous = _ambiguous_hand()
+    actions = []
+    for timestamp, points in (
+        (0, ambiguous),
+        (80, ambiguous),
+        (120, ambiguous),
+        (160, hand()),
+        (200, hand()),
+    ):
+        actions.extend(gesture.process(frame(timestamp, points)).actions)
+    assert [(action.type.value, action.button) for action in actions if action.button] == [
+        ("button_down", Button.RIGHT),
+        ("button_up", Button.RIGHT),
+    ]

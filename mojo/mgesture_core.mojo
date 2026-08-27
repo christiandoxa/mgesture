@@ -9,6 +9,9 @@ comptime ACTION_BUTTON_DOWN = Int32(2)
 comptime ACTION_BUTTON_UP = Int32(3)
 comptime ACTION_SCROLL = Int32(4)
 comptime MGESTURE_MOJO_ABI_VERSION = Int32(1)
+comptime LANDMARK_COUNT = Int(63)
+comptime LANDMARK_ABS_LIMIT = Float64(2.0)
+comptime MIN_PALM_SCALE = Float64(0.0001)
 
 comptime STATE_PAUSED = Int32(0)
 comptime STATE_ARMED = Int32(1)
@@ -114,7 +117,7 @@ struct GestureEngine(Copyable, Movable, Writable):
         self.held = 0
         self.down_candidate = 0
         self.down_since_ms = 0
-        self.release_since_ms = 0
+        self.release_since_ms = -1
         self.invalid_since_ms = -1
         self.reacquire_since_ms = 0
         self.last_x = -1.0
@@ -147,7 +150,7 @@ struct GestureEngine(Copyable, Movable, Writable):
         self.held = 0
         self.down_candidate = 0
         self.down_since_ms = 0
-        self.release_since_ms = 0
+        self.release_since_ms = -1
         self.invalid_since_ms = -1
         self.reacquire_since_ms = 0
         self.last_x = -1.0
@@ -163,7 +166,7 @@ struct GestureEngine(Copyable, Movable, Writable):
     def reset_transient(mut self):
         self.down_candidate = 0
         self.down_since_ms = 0
-        self.release_since_ms = 0
+        self.release_since_ms = -1
         self.invalid_since_ms = -1
         self.reacquire_since_ms = 0
         self.last_x = -1.0
@@ -215,11 +218,23 @@ struct GestureEngine(Copyable, Movable, Writable):
         return sqrt(dx * dx + dy * dy + dz * dz)
 
     @staticmethod
+    def palm_scale(landmarks: Pointer[mut=True, Float32, MutAnyOrigin]) -> Float64:
+        return 0.5 * (Self.distance(landmarks, 0, 9) + Self.distance(landmarks, 5, 17))
+
+    @staticmethod
+    def valid_landmarks(landmarks: Pointer[mut=True, Float32, MutAnyOrigin]) -> Bool:
+        for i in range(LANDMARK_COUNT):
+            var value = Float64(landmarks[unsafe_offset=i])
+            if value != value or abs(value) > LANDMARK_ABS_LIMIT:
+                return False
+        return Self.palm_scale(landmarks) > MIN_PALM_SCALE
+
+    @staticmethod
     def finger_extended(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], tip: Int, pip: Int, mcp: Int) -> Bool:
         return Self.distance(landmarks, tip, mcp) > Self.distance(landmarks, pip, mcp) * 1.25
 
     def measure(self, landmarks: Pointer[mut=True, Float32, MutAnyOrigin]) -> Measurements:
-        var palm_scale = max(0.000001, 0.5 * (Self.distance(landmarks, 0, 9) + Self.distance(landmarks, 5, 17)))
+        var palm_scale = max(0.000001, Self.palm_scale(landmarks))
         var index_pinch = Self.distance(landmarks, 4, 8) / palm_scale
         var middle_pinch = Self.distance(landmarks, 4, 12) / palm_scale
         var palm_x = (Self.coord(landmarks, 0, 0) + Self.coord(landmarks, 5, 0) + Self.coord(landmarks, 9, 0) + Self.coord(landmarks, 13, 0) + Self.coord(landmarks, 17, 0)) / 5.0
@@ -230,7 +245,7 @@ struct GestureEngine(Copyable, Movable, Writable):
         var middle_extended = Self.finger_extended(landmarks, 12, 10, 9)
         var ring_extended = Self.finger_extended(landmarks, 16, 14, 13)
         var pinky_extended = Self.finger_extended(landmarks, 20, 18, 17)
-        var scroll_pose = index_extended and middle_extended and not ring_extended and not pinky_extended and middle_pinch > self.config.pinch_release_threshold
+        var scroll_pose = index_extended and middle_extended and not ring_extended and not pinky_extended and index_pinch > self.config.pinch_release_threshold and middle_pinch > self.config.pinch_release_threshold
         var open_palm = index_extended and middle_extended and ring_extended and pinky_extended
         return Measurements(index_pinch, middle_pinch, palm_x, palm_y, index_x, index_y, scroll_pose, open_palm)
 
@@ -249,6 +264,8 @@ struct GestureEngine(Copyable, Movable, Writable):
             self.filter_x = x
             self.filter_y = y
             return FilteredPoint(x, y)
+        if timestamp_s <= self.filter_last_time:
+            return FilteredPoint(self.filter_x, self.filter_y)
         var dt = max(timestamp_s - self.filter_last_time, 0.0001)
         var raw_dx = (x - self.filter_last_x) / dt
         var raw_dy = (y - self.filter_last_y) / dt
@@ -282,7 +299,7 @@ struct GestureEngine(Copyable, Movable, Writable):
         now_y = min(1.0, max(0.0, now_y))
         var out_x = self.config.screen_x + now_x * max(1.0, self.config.screen_width - 1.0)
         var out_y = self.config.screen_y + now_y * max(1.0, self.config.screen_height - 1.0)
-        var quiet = self.last_x >= 0.0 and sqrt((filtered.x - self.last_x) * (filtered.x - self.last_x) + (filtered.y - self.last_y) * (filtered.y - self.last_y)) < self.config.dead_zone
+        var quiet = self.last_x >= 0.0 and sqrt((filtered.x - self.last_x) * (filtered.x - self.last_x) + (filtered.y - self.last_y) * (filtered.y - self.last_y)) <= self.config.dead_zone
         if not quiet:
             self.last_x = filtered.x
             self.last_y = filtered.y
@@ -290,10 +307,14 @@ struct GestureEngine(Copyable, Movable, Writable):
         return Self.result(ACTION_NONE, out_x, out_y, 0, self.state)
 
     def process(mut self, landmarks: Pointer[mut=True, Float32, MutAnyOrigin], timestamp_ms: Int64, right_hand: Int32, confidence: Float64) -> MojoAction:
-        if right_hand == 0 or confidence < self.config.handedness_confidence:
+        var valid = right_hand != 0 and confidence == confidence and confidence >= 0.0 and confidence <= 1.0 and confidence >= self.config.handedness_confidence
+        if valid:
+            valid = Self.valid_landmarks(landmarks)
+        if not valid:
             if self.invalid_since_ms < 0:
+                self.reset_transient()
                 self.invalid_since_ms = timestamp_ms
-            if self.held != 0 and timestamp_ms - self.invalid_since_ms >= self.config.hand_loss_timeout_ms:
+            if timestamp_ms - self.invalid_since_ms >= self.config.hand_loss_timeout_ms:
                 return self.reset_internal()
             return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
 
@@ -311,8 +332,7 @@ struct GestureEngine(Copyable, Movable, Writable):
                 self.open_since_ms = -1
                 self.armed = not self.armed
                 self.held = 0
-                self.last_x = -1.0
-                self.last_y = -1.0
+                self.reset_transient()
                 if button != 0 and not self.armed:
                     self.state = STATE_PAUSED
                     return Self.result_after(ACTION_BUTTON_UP, 0.0, 0.0, button, self.state)
@@ -322,7 +342,14 @@ struct GestureEngine(Copyable, Movable, Writable):
             self.open_since_ms = -1
 
         if not self.armed or timestamp_ms - self.reacquire_since_ms < self.config.reacquisition_ms:
-            self.state = STATE_ARMED if self.armed else STATE_PAUSED
+            if not self.armed:
+                self.state = STATE_PAUSED
+            elif self.held == 1:
+                self.state = STATE_LEFT_DOWN
+            elif self.held == 2:
+                self.state = STATE_RIGHT_DOWN
+            else:
+                self.state = STATE_ARMED
             return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
 
         var left_pressed = measurements.index_pinch <= self.config.pinch_down_threshold
@@ -330,16 +357,16 @@ struct GestureEngine(Copyable, Movable, Writable):
         if self.held != 0:
             var still_pressed = (self.held == 1 and measurements.index_pinch <= self.config.pinch_release_threshold) or (self.held == 2 and measurements.middle_pinch <= self.config.pinch_release_threshold)
             if not still_pressed:
-                if self.release_since_ms == 0:
+                if self.release_since_ms < 0:
                     self.release_since_ms = timestamp_ms
-                if timestamp_ms - self.release_since_ms >= self.config.release_debounce_ms:
+                if self.config.release_debounce_ms <= 0 or timestamp_ms - self.release_since_ms >= self.config.release_debounce_ms:
                     var button = self.held
                     self.held = 0
                     self.reset_transient()
                     self.state = STATE_ARMED
                     return Self.result_after(ACTION_BUTTON_UP, 0.0, 0.0, button, self.state)
             else:
-                self.release_since_ms = 0
+                self.release_since_ms = -1
             var pointer = self.pointer(measurements, timestamp_ms)
             self.state = STATE_LEFT_DOWN if self.held == 1 else STATE_RIGHT_DOWN
             pointer.button = self.held
@@ -350,26 +377,26 @@ struct GestureEngine(Copyable, Movable, Writable):
             if self.down_candidate != 2:
                 self.down_candidate = 2
                 self.down_since_ms = timestamp_ms
-            if timestamp_ms - self.down_since_ms >= self.config.debounce_ms:
+            if self.config.debounce_ms <= 0 or timestamp_ms - self.down_since_ms >= self.config.debounce_ms:
                 self.held = 2
                 self.down_candidate = 0
                 self.state = STATE_RIGHT_DOWN
                 return Self.result(ACTION_BUTTON_DOWN, 0.0, 0.0, 2, self.state)
             var pointer = self.pointer(measurements, timestamp_ms)
-            self.state = STATE_ARMED
-            return Self.result(ACTION_MOVE, pointer.x, pointer.y, 0, self.state)
-        if left_pressed:
+            pointer.state = STATE_ARMED
+            return pointer^
+        if left_pressed and not right_pressed:
             if self.down_candidate != 1:
                 self.down_candidate = 1
                 self.down_since_ms = timestamp_ms
-            if timestamp_ms - self.down_since_ms >= self.config.debounce_ms:
+            if self.config.debounce_ms <= 0 or timestamp_ms - self.down_since_ms >= self.config.debounce_ms:
                 self.held = 1
                 self.down_candidate = 0
                 self.state = STATE_LEFT_DOWN
                 return Self.result(ACTION_BUTTON_DOWN, 0.0, 0.0, 1, self.state)
             var pointer = self.pointer(measurements, timestamp_ms)
-            self.state = STATE_ARMED
-            return Self.result(ACTION_MOVE, pointer.x, pointer.y, 0, self.state)
+            pointer.state = STATE_ARMED
+            return pointer^
 
         if measurements.scroll_pose:
             if self.scroll_entry_since_ms < 0:
@@ -378,17 +405,25 @@ struct GestureEngine(Copyable, Movable, Writable):
                 if not self.scroll_active:
                     self.scroll_active = True
                     self.last_palm_y = measurements.palm_y
+                    self.last_x = -1.0
+                    self.last_y = -1.0
+                    self.filter_initialized = False
+                    self.derivative_initialized = False
                     self.state = STATE_SCROLL
                     return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
                 var dy = measurements.palm_y - self.last_palm_y
-                self.last_palm_y = measurements.palm_y
-                if abs(dy) >= self.config.scroll_dead_zone:
-                    self.scroll_remainder += -dy * self.config.scroll_sensitivity * Float64(self.config.scroll_direction)
-                    var steps = Int32(self.scroll_remainder)
-                    if steps != 0:
-                        self.scroll_remainder -= Float64(steps)
-                        self.state = STATE_SCROLL
-                        return Self.result(ACTION_SCROLL, 0.0, Float64(steps), 0, self.state)
+                if abs(dy) <= self.config.scroll_dead_zone:
+                    self.state = STATE_SCROLL
+                    return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+                var direction = 1.0 if dy > 0.0 else -1.0
+                var effective_dy = dy - direction * self.config.scroll_dead_zone
+                self.last_palm_y = measurements.palm_y - direction * self.config.scroll_dead_zone
+                self.scroll_remainder += -effective_dy * self.config.scroll_sensitivity * Float64(self.config.scroll_direction)
+                var steps = Int32(self.scroll_remainder)
+                if steps != 0:
+                    self.scroll_remainder -= Float64(steps)
+                    self.state = STATE_SCROLL
+                    return Self.result(ACTION_SCROLL, 0.0, Float64(steps), 0, self.state)
                 self.state = STATE_SCROLL
                 return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
         else:
@@ -396,6 +431,10 @@ struct GestureEngine(Copyable, Movable, Writable):
             self.scroll_remainder = 0.0
             if self.scroll_active:
                 self.scroll_active = False
+                self.last_x = -1.0
+                self.last_y = -1.0
+                self.filter_initialized = False
+                self.derivative_initialized = False
                 self.state = STATE_ARMED
                 var pointer = self.pointer(measurements, timestamp_ms)
                 return pointer^

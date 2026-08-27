@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from mgesture.engine import EngineConfig, EngineUnavailableError, LandmarkFrame, create_engine
 from mgesture.engine.synthetic import synthetic_landmarks
+
+
+def _ambiguous_landmarks():
+    values = list(synthetic_landmarks())
+    values[12:15] = (0.50, 0.325, 0.0)
+    return tuple(values)
 
 
 def test_mojo_and_python_match_pointer_and_button_contract():
@@ -42,3 +50,39 @@ def test_mojo_and_python_match_pointer_and_button_contract():
     for mojo_move, python_move in zip(mojo_moves, python_moves, strict=True):
         assert abs((mojo_move.x or 0.0) - (python_move.x or 0.0)) < 80.0
         assert abs((mojo_move.y or 0.0) - (python_move.y or 0.0)) < 80.0
+
+
+def test_mojo_and_python_match_safety_and_arbitration_edges():
+    try:
+        config = EngineConfig(
+            reacquisition_ms=100,
+            hand_loss_timeout_ms=100,
+            activation_gesture=False,
+            dead_zone=0.0,
+        )
+        python_engine = create_engine("python", config, armed=True)
+        mojo_engine = create_engine("mojo", config, armed=True)
+    except EngineUnavailableError as exc:
+        pytest.skip(str(exc))
+    ambiguous = _ambiguous_landmarks()
+    invalid = list(synthetic_landmarks())
+    invalid[0] = math.nan
+    frames = [
+        LandmarkFrame(0, synthetic_landmarks(pinch="left"), "Right", 0.99),
+        LandmarkFrame(120, synthetic_landmarks(pinch="left"), "Right", 0.99),
+        LandmarkFrame(200, synthetic_landmarks(pinch="left"), "Right", 0.99),
+        LandmarkFrame(220, tuple(invalid), "Right", 0.99),
+        LandmarkFrame(330, tuple(invalid), "Right", 0.99),
+        LandmarkFrame(360, ambiguous, "Right", 0.99),
+        LandmarkFrame(360, ambiguous, "Right", 0.99),
+        LandmarkFrame(460, ambiguous, "Right", 0.99),
+        LandmarkFrame(540, ambiguous, "Right", 0.99),
+        LandmarkFrame(580, synthetic_landmarks(), "Right", 0.99),
+        LandmarkFrame(620, synthetic_landmarks(), "Right", 0.99),
+    ]
+    for frame in frames:
+        python_batch = python_engine.process(frame)
+        mojo_batch = mojo_engine.process(frame)
+        assert [
+            (action.type.value, action.button, action.state) for action in mojo_batch.actions
+        ] == [(action.type.value, action.button, action.state) for action in python_batch.actions]
