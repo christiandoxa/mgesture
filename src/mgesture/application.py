@@ -150,13 +150,11 @@ class Application:
         self._dispatch(batch)
 
     def _start_hotkey(self) -> None:
-        listener = GlobalShortcutListener(self.config.activation_shortcut)
         try:
+            listener = GlobalShortcutListener(self.config.activation_shortcut)
             listener.start()
         except Exception as exc:
-            LOGGER.warning(
-                "global activation shortcut unavailable: %s; run `mgesture doctor`", exc
-            )
+            LOGGER.warning("global activation shortcut unavailable: %s; run `mgesture doctor`", exc)
             return
         self._hotkey_listener = listener
 
@@ -202,6 +200,7 @@ class Application:
         landmarker: HandLandmarker | None = None
         try:
             self._install_signals()
+            self._start_hotkey()
             model = (
                 available_model(Path(self.config.vision.model_path))
                 if self.config.vision.model_path
@@ -280,7 +279,6 @@ class Application:
                 self.compute_plan.inference.removeprefix("mediapipe_").upper(),
                 self.config.activation_shortcut,
             )
-            self._start_hotkey()
             hand_tracked = False
             last_camera_warning = 0.0
             handled_camera_failure = 0

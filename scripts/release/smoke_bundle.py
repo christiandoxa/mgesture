@@ -57,38 +57,6 @@ def _validate_pynput_bundle(binary: Path, target_os: str) -> None:
         )
 
 
-def _validate_runtime_input(binary: Path, root: Path, environment: dict[str, str]) -> None:
-    result = subprocess.run(
-        [str(binary), "doctor", "--json"],
-        cwd=root,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    try:
-        report = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        detail = (result.stderr or result.stdout).strip()
-        raise RuntimeError(f"packaged input smoke did not return JSON: {detail}") from exc
-    checks = report.get("checks", []) if isinstance(report, dict) else []
-    input_check = next(
-        (
-            check
-            for check in checks
-            if isinstance(check, dict) and check.get("name") == "input backend"
-        ),
-        None,
-    )
-    if not isinstance(input_check, dict) or input_check.get("ok") is not True:
-        detail = (
-            input_check.get("detail", "missing input backend check")
-            if input_check
-            else "missing input backend check"
-        )
-        raise RuntimeError(f"packaged input backend smoke failed: {detail}")
-
-
 def _safe_destination(root: Path, member_name: str) -> Path:
     normalized = member_name.replace("\\", "/")
     parts = PurePosixPath(normalized).parts
@@ -206,14 +174,20 @@ def smoke(archive_path: Path, target_name: str) -> None:
 
         environment = _isolated_environment(bundle, release_target.os, temporary)
         _validate_pynput_bundle(binary, release_target.os)
-        _validate_runtime_input(binary, bundle, environment)
         version_output = _run(binary, ["--version"], bundle, environment)
         if str(metadata.get("version", "")) not in version_output:
             raise RuntimeError("packaged version output does not match metadata")
         _run(binary, ["--help"], bundle, environment)
         _run(
             binary,
-            ["self-test", "--headless", "--fake-input", "--engine", "mojo"],
+            [
+                "self-test",
+                "--headless",
+                "--fake-input",
+                "--platform-input",
+                "--engine",
+                "mojo",
+            ],
             bundle,
             environment,
         )

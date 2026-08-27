@@ -34,20 +34,8 @@ def platform_input_checks() -> dict[str, str]:
         "passed" if not module_errors else "failed: " + "; ".join(module_errors)
     )
 
-    listener: GlobalShortcutListener | None = None
-    try:
-        listener = GlobalShortcutListener("ctrl+alt+m")
-        listener.start()
-        checks["keyboard_listener"] = "passed"
-    except Exception as exc:
-        checks["keyboard_listener"] = f"failed: {exc}"
-    finally:
-        if listener is not None:
-            try:
-                listener.stop()
-            except Exception as exc:
-                checks["keyboard_listener"] = f"failed: {exc}"
-
+    # Probe the mouse before stopping the XRecord keyboard listener. Some
+    # isolated Xvfb builds close their client connection during XRecord teardown.
     backend: Any = None
     try:
         backend = create_backend()
@@ -63,6 +51,21 @@ def platform_input_checks() -> dict[str, str]:
                 backend.close()
             except Exception as exc:
                 checks["mouse_backend"] = f"failed: {exc}"
+
+    listener: GlobalShortcutListener | None = None
+    try:
+        listener = GlobalShortcutListener("ctrl+alt+m")
+        listener.start()
+        checks["keyboard_listener"] = "passed"
+    except Exception as exc:
+        checks["keyboard_listener"] = f"failed: {exc}"
+    finally:
+        if listener is not None:
+            try:
+                listener.stop()
+            except Exception as exc:
+                checks["keyboard_listener"] = f"failed: {exc}"
+
     return checks
 
 

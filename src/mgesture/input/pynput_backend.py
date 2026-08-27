@@ -24,6 +24,24 @@ _CONNECTED_RE = re.compile(
 )
 
 
+def _pynput_failure_detail(error: BaseException) -> str:
+    message = " ".join(str(error).split())
+    match = re.search(r"No module named [\"']([^\"']+)", message)
+    if match:
+        module = match.group(1)
+        if module.startswith("pynput."):
+            return (
+                "packaged Linux X11 input support is incomplete: "
+                f"missing Pynput backend module {module}"
+            )
+        if module.startswith("Xlib."):
+            return f"packaged Linux X11 input support is incomplete: missing Xlib module {module}"
+        return f"packaged Linux X11 input support is incomplete: missing module {module}"
+    if "failed to acquire X connection" in message or "Can't connect to display" in message:
+        return f"cannot connect to DISPLAY={os.environ.get('DISPLAY', '<unset>')}: {message}"
+    return message
+
+
 def parse_xrandr_monitors(output: str) -> ScreenLayout:
     monitors: list[Monitor] = []
     for match in _LIST_MONITORS_RE.finditer(output):
@@ -110,7 +128,9 @@ class PynputMouseBackend:
             self._mouse = mouse
             self._controller = mouse.Controller()
         except Exception as exc:
-            raise RuntimeError(f"pynput X11 backend unavailable: {exc}") from exc
+            raise RuntimeError(
+                f"pynput X11 backend unavailable: {_pynput_failure_detail(exc)}"
+            ) from exc
         self._held: set[Button] = set()
 
     def get_screen_layout(self) -> ScreenLayout:

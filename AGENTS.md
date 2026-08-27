@@ -208,7 +208,7 @@ A change is done only when existing reusable code was considered, no unnecessary
 
 ## Incident guardrails
 
-- Exercise dynamic platform backends from final extracted standalone bundles.
-- Run X11 tests under an isolated X server/display.
-- Keep one canonical configured pause/resume hotkey shared by app and tutorial.
-- Keep control-plane pause/resume independent of camera frames.
+- Explicitly include and exercise dynamically selected Pynput platform backends from the final extracted standalone bundle; source imports are not proof.
+- Linux X11 standalone tests must exercise both Pynput mouse and keyboard Xorg backends under an isolated X server/display.
+- Keep one canonical configured pause/resume hotkey listener shared by normal runtime and tutorial.
+- Process pause/resume control-plane events independently of MediaPipe frame delivery.

@@ -213,7 +213,7 @@ jobs:
         run: |
           pixi run python -c "import os; from pathlib import Path; n=chr(10); mode=os.environ['MODE']; Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('## Mojo validation'+n+n+'- Target: '+os.environ['TARGET']+n+'- Mojo source: available'+n+'- Validation mode: '+mode+n+'- Native Mojo runtime: '+('available' if mode == 'native' else 'unavailable')+n+'- Python fallback: available'+n)"
       - name: Start Xvfb for Linux input smoke
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           sudo apt-get update

@@ -159,6 +159,7 @@ def run_tutorial(
         if step == 6:
             if not engine.armed:
                 progress["paused"] = True
+                last_success = f"✓ Paused — press {config.activation_shortcut} again to resume"
             elif progress.get("paused"):
                 last_success = "✓ Pause and resume understood"
                 step = _advance(step, progress)

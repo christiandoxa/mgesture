@@ -260,6 +260,7 @@ def _linux_x11_selected(config: AppConfig) -> bool:
         config.input.backend == "x11"
         or (
             config.input.backend == "auto"
+            and not os.environ.get("WAYLAND_DISPLAY")
             and os.environ.get("XDG_SESSION_TYPE", "x11").lower() != "wayland"
         )
     )

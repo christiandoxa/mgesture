@@ -31,18 +31,23 @@ from mgesture.release import mojo_source_metadata, mojo_source_paths  # noqa: E4
 from mgesture.vision.model_manager import available_model  # noqa: E402
 
 _PYNPUT_BACKENDS = {
-    "linux": "xorg",
-    "macos": "darwin",
-    "windows": "win32",
+    "linux": ("xorg", "xorg_keysyms"),
+    "macos": ("darwin", "darwin_vks"),
+    "windows": ("win32", "win32_vks"),
 }
 
 
-def pynput_hidden_imports(target_os: str) -> tuple[str, str]:
+def pynput_hidden_imports(target_os: str) -> tuple[str, ...]:
     try:
-        backend = _PYNPUT_BACKENDS[target_os]
+        backend, utility = _PYNPUT_BACKENDS[target_os]
     except KeyError as exc:
         raise ValueError(f"unsupported pynput target OS: {target_os}") from exc
-    return (f"pynput.keyboard._{backend}", f"pynput.mouse._{backend}")
+    return (
+        f"pynput.keyboard._{backend}",
+        f"pynput.mouse._{backend}",
+        f"pynput._util.{backend}",
+        f"pynput._util.{utility}",
+    )
 
 
 def _write_pynput_hook(work: Path, target_os: str) -> Path:

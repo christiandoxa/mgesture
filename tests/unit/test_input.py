@@ -10,7 +10,11 @@ from mgesture.engine import Action, ActionBatch, Button, EngineConfig, PythonGes
 from mgesture.input import FakeMouseBackend, InputDispatcher, Monitor, ScreenLayout
 from mgesture.input.linux_wayland_backend import LinuxWaylandBackend
 from mgesture.input.macos_backend import MacOSMouseBackend, active_display_ids
-from mgesture.input.pynput_backend import parse_xrandr_monitors, x11_screen_layout
+from mgesture.input.pynput_backend import (
+    _pynput_failure_detail,
+    parse_xrandr_monitors,
+    x11_screen_layout,
+)
 from mgesture.input.windows_backend import (
     enable_process_dpi_awareness,
     normalize_absolute,
@@ -176,6 +180,15 @@ def test_x11_layout_queries_xrandr_without_falling_back_to_fake_bounds(
 
     layout = x11_screen_layout()
     assert (layout.x, layout.y, layout.width, layout.height) == (-1280, 0, 1280, 720)
+
+
+def test_x11_backend_error_identifies_missing_packaged_pynput_module():
+    detail = _pynput_failure_detail(ModuleNotFoundError("No module named 'pynput.keyboard._xorg'"))
+
+    assert detail == (
+        "packaged Linux X11 input support is incomplete: "
+        "missing Pynput backend module pynput.keyboard._xorg"
+    )
 
 
 def test_windows_virtual_desktop_normalization_handles_negative_coordinates():

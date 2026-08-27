@@ -204,15 +204,30 @@ def test_bundle_smoke_rejects_archive_path_escape(tmp_path: Path) -> None:
     [
         (
             "x86_64-unknown-linux-gnu",
-            ("pynput.keyboard._xorg", "pynput.mouse._xorg"),
+            (
+                "pynput.keyboard._xorg",
+                "pynput.mouse._xorg",
+                "pynput._util.xorg",
+                "pynput._util.xorg_keysyms",
+            ),
         ),
         (
             "aarch64-apple-darwin",
-            ("pynput.keyboard._darwin", "pynput.mouse._darwin"),
+            (
+                "pynput.keyboard._darwin",
+                "pynput.mouse._darwin",
+                "pynput._util.darwin",
+                "pynput._util.darwin_vks",
+            ),
         ),
         (
             "x86_64-pc-windows-msvc",
-            ("pynput.keyboard._win32", "pynput.mouse._win32"),
+            (
+                "pynput.keyboard._win32",
+                "pynput.mouse._win32",
+                "pynput._util.win32",
+                "pynput._util.win32_vks",
+            ),
         ),
     ],
 )
@@ -244,6 +259,8 @@ def test_bundle_pynput_hook_is_narrow(tmp_path: Path) -> None:
             {
                 "pynput.keyboard._xorg",
                 "pynput.mouse._xorg",
+                "pynput._util.xorg",
+                "pynput._util.xorg_keysyms",
                 "pynput.keyboard._win32",
             },
             "foreign pynput backend",

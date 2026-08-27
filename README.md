@@ -68,7 +68,8 @@ The first time you run `mgesture`, the safe tutorial teaches hand selection, cam
 handedness, pointer movement, left click, hold and drag, right click, scrolling, pause/resume,
 and emergency stop. It uses the real camera and production gesture engine with a fake input
 backend, so practice cannot move or click the real mouse. If you stop before completing it, the
-tutorial runs again next time. Press `K` to skip.
+tutorial runs again next time. At the pause/resume step, press the configured shortcut once to
+pause and again to resume; `Space` is the preview-only fallback. Press `K` to skip.
 
 ## Calibration
 
