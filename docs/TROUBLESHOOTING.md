@@ -2,7 +2,8 @@
 
 - `model unavailable`: run `mgesture model install`, or set a verified custom `vision.model_path`.
 - `camera unavailable` or `camera read failed`: run `mgesture list-cameras`, check negotiated mode and permissions, and close other camera users. Runtime retries with bounded backoff; held buttons are released on every detected outage.
-- X11 backend failure: verify `DISPLAY`, `xrandr`, and XTest/pynput access; monitor discovery fails closed when the layout cannot be queried.
+- X11 input failure: run `mgesture doctor`; separate checks identify missing `DISPLAY`/X11, XTest, `xrandr`, and packaged `pynput` dynamic modules. Reinstall the standalone bundle only when a packaged `pynput` module is missing.
+- Pause/resume: use the configured shortcut shown at startup (`ctrl+alt+m` by default); press it again to resume. Check it with `mgesture config show`.
 - Wayland backend failure: verify `XDG_SESSION_TYPE=wayland` or `WAYLAND_DISPLAY`, `/dev/uinput` existence, and the narrowly scoped udev helper; uinput provides relative movement only and the normal app does not require root.
 - macOS backend failure: grant Camera and Accessibility permissions to the terminal/app.
 - `--engine mojo` failure: run `pixi run mojo-build`; use `--engine python` when the current platform/bindings are unavailable.

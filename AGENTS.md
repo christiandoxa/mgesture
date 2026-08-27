@@ -205,3 +205,10 @@ After editing, inspect the diff, search for duplicate constants/functions, remov
 ## Definition of done
 
 A change is done only when existing reusable code was considered, no unnecessary duplicate was introduced, tests/lint/type checks pass, relevant Mojo code compiles, docs reflect public behavior, safety paths release buttons, and every performance/platform claim is supported by an actual check.
+
+## Incident guardrails
+
+- Exercise dynamic platform backends from final extracted standalone bundles.
+- Run X11 tests under an isolated X server/display.
+- Keep one canonical configured pause/resume hotkey shared by app and tutorial.
+- Keep control-plane pause/resume independent of camera frames.

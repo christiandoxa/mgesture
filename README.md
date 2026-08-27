@@ -35,7 +35,8 @@ mgesture
 
 That’s it. mgesture automatically selects the available camera, compute backend, gesture
 engine, and supported desktop input backend using safe defaults. It starts paused; press the
-configured shortcut shown at startup to activate it.
+configured shortcut shown at startup (`ctrl+alt+m` by default) to activate it. Press the same
+shortcut again to pause. Use `mgesture config show` to confirm the configured shortcut.
 
 On the first launch, mgesture asks which hand you want to use and guides you through a short
 interactive tutorial. Later launches go straight to normal operation with your saved settings.
@@ -188,6 +189,17 @@ If startup cannot access a camera, input backend, compute option, or operating-s
 mgesture doctor
 mgesture list-cameras
 ```
+
+### Linux/X11 input problems
+
+Run `mgesture doctor` and fix the failing capability:
+
+- `X11 display`: `DISPLAY` is missing or the X server cannot be reached.
+- `X11 XTest`: the XTest extension is unavailable.
+- `xrandr`: the command is missing; install it and retry.
+- `pynput capabilities`: a missing packaged `pynput` dynamic module means the standalone
+  bundle is incomplete; reinstall the bundle. This is separate from `DISPLAY`, XTest, and
+  `xrandr` setup.
 
 ### mgesture detects the wrong hand
 

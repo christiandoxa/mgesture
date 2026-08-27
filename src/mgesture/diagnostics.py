@@ -4,6 +4,7 @@ import importlib
 import importlib.metadata
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,233 @@ class Check:
     remediation: str = ""
     required: bool = True
     data: dict[str, object] | None = None
+
+
+def _compact_error(exc: BaseException) -> str:
+    return " ".join(str(exc).split())
+
+
+def _missing_module_name(exc: BaseException) -> str | None:
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        name = getattr(current, "name", None)
+        if isinstance(name, str) and name:
+            return name
+        match = re.search(r"No module named [\"']([^\"']+)", str(current))
+        if match:
+            return match.group(1)
+        for nested in (current.__cause__, current.__context__):
+            if nested is not None:
+                pending.append(nested)
+    return None
+
+
+def _x11_display_check() -> Check:
+    display_name = os.environ.get("DISPLAY")
+    if not display_name:
+        return Check(
+            "X11 display",
+            False,
+            "DISPLAY is not set",
+            "Run from an X11 session with an accessible DISPLAY.",
+            data={"display": None, "connected": False},
+        )
+    display = None
+    try:
+        xlib_display = importlib.import_module("Xlib.display")
+        display = xlib_display.Display(display_name)
+    except Exception as exc:
+        missing = _missing_module_name(exc)
+        detail = (
+            f"X11 Python support unavailable: {missing}"
+            if missing
+            else f"cannot connect to DISPLAY={display_name}: {_compact_error(exc)}"
+        )
+        remediation = (
+            "Reinstall the standalone bundle; its X11 Python support is incomplete."
+            if missing
+            else "Run from an X11 session with an accessible DISPLAY."
+        )
+        return Check(
+            "X11 display",
+            False,
+            detail,
+            remediation,
+            data={"display": display_name, "connected": False},
+        )
+    finally:
+        if display is not None:
+            try:
+                display.close()
+            except Exception:
+                pass
+    return Check(
+        "X11 display",
+        True,
+        f"DISPLAY={display_name}; connection available",
+        data={"display": display_name, "connected": True},
+    )
+
+
+def _x11_xtest_check(display_check: Check) -> Check:
+    if not display_check.ok:
+        return Check(
+            "X11 XTest",
+            False,
+            "not checked: X11 display unavailable",
+            "Fix the X11 display check first.",
+            data={"present": False, "checked": False},
+        )
+    display = None
+    try:
+        importlib.import_module("Xlib.ext.xtest")
+        xlib_display = importlib.import_module("Xlib.display")
+        display = xlib_display.Display(os.environ["DISPLAY"])
+        extension = display.query_extension("XTEST")
+        present = bool(getattr(extension, "present", False))
+        opcode = getattr(extension, "major_opcode", None)
+    except Exception as exc:
+        missing = _missing_module_name(exc)
+        detail = (
+            f"XTest Python support unavailable: {missing}"
+            if missing
+            else f"cannot query XTest: {_compact_error(exc)}"
+        )
+        return Check(
+            "X11 XTest",
+            False,
+            detail,
+            "Enable the XTest extension on the X server or reinstall the standalone bundle.",
+            data={"present": False, "checked": True},
+        )
+    finally:
+        if display is not None:
+            try:
+                display.close()
+            except Exception:
+                pass
+    if not present:
+        return Check(
+            "X11 XTest",
+            False,
+            "XTest extension is unavailable",
+            "Enable the XTest extension on the X server.",
+            data={"present": False, "checked": True},
+        )
+    return Check(
+        "X11 XTest",
+        True,
+        f"XTest extension available{f'; opcode={opcode}' if opcode is not None else ''}",
+        data={"present": True, "checked": True, "opcode": opcode},
+    )
+
+
+def _xrandr_check() -> Check:
+    command = shutil.which("xrandr")
+    if command is None:
+        return Check(
+            "xrandr",
+            False,
+            "command not found",
+            "Install the xrandr command and ensure it can query the active display.",
+            data={"command": None},
+        )
+    return Check("xrandr", True, f"command={command}", data={"command": command})
+
+
+def _pynput_capability_check(shortcut: str, display_ok: bool) -> Check:
+    capabilities: dict[str, object] = {
+        "keyboard": False,
+        "mouse": False,
+        "hotkey": False,
+        "configured_shortcut": shortcut,
+        "listener_started": False,
+    }
+    if not display_ok:
+        return Check(
+            "pynput capabilities",
+            False,
+            "keyboard=not checked; mouse=not checked; hotkey=not checked; X11 display unavailable",
+            "Fix the X11 display check first.",
+            data=capabilities,
+        )
+    try:
+        pynput = importlib.import_module("pynput")
+    except Exception as exc:
+        missing = _missing_module_name(exc)
+        if missing and missing.startswith("pynput."):
+            detail = (
+                "keyboard=unavailable; mouse=unavailable; hotkey=unavailable; "
+                f"missing packaged pynput dynamic module: {missing}"
+            )
+            remediation = (
+                "Reinstall the standalone bundle; its packaged pynput X11 modules are incomplete."
+            )
+        elif missing == "pynput":
+            detail = "keyboard=unavailable; mouse=unavailable; hotkey=unavailable; pynput package unavailable"
+            remediation = "Install or reinstall the standalone bundle with pynput support."
+        elif missing:
+            detail = (
+                "keyboard=unavailable; mouse=unavailable; hotkey=unavailable; "
+                f"missing X11 dependency: {missing}"
+            )
+            remediation = "Reinstall the standalone bundle and restore its X11 dependencies."
+        else:
+            detail = f"keyboard=unavailable; mouse=unavailable; hotkey=unavailable; import failed: {_compact_error(exc)}"
+            remediation = "Check X11 display/XTest access and the bundled pynput installation."
+        return Check("pynput capabilities", False, detail, remediation, data=capabilities)
+
+    keyboard = getattr(pynput, "keyboard", None)
+    mouse = getattr(pynput, "mouse", None)
+    capabilities["keyboard"] = callable(getattr(keyboard, "Controller", None))
+    capabilities["mouse"] = callable(getattr(mouse, "Controller", None))
+    hotkey = getattr(keyboard, "HotKey", None)
+    capabilities["hotkey"] = callable(getattr(keyboard, "GlobalHotKeys", None)) and callable(
+        getattr(hotkey, "parse", None)
+    )
+    statuses = "; ".join(
+        f"{name}={'available' if capabilities[name] else 'unavailable'}"
+        for name in ("keyboard", "mouse", "hotkey")
+    )
+    if all(capabilities[name] for name in ("keyboard", "mouse", "hotkey")):
+        return Check(
+            "pynput capabilities",
+            True,
+            f"{statuses}; configured={shortcut}; listener=not started",
+            data=capabilities,
+        )
+    return Check(
+        "pynput capabilities",
+        False,
+        f"{statuses}; packaged pynput modules are incomplete",
+        "Reinstall the standalone bundle; its packaged pynput X11 modules are incomplete.",
+        data=capabilities,
+    )
+
+
+def _linux_x11_selected(config: AppConfig) -> bool:
+    return sys.platform == "linux" and (
+        config.input.backend == "x11"
+        or (
+            config.input.backend == "auto"
+            and os.environ.get("XDG_SESSION_TYPE", "x11").lower() != "wayland"
+        )
+    )
+
+
+def _linux_x11_checks(shortcut: str) -> list[Check]:
+    display = _x11_display_check()
+    return [
+        display,
+        _x11_xtest_check(display),
+        _xrandr_check(),
+        _pynput_capability_check(shortcut, display.ok),
+    ]
 
 
 def _version(module_name: str, distribution: str | None = None) -> str:
@@ -328,6 +556,8 @@ def collect_checks(
                 config.camera.target_fps,
             )
         )
+    if check_input and _linux_x11_selected(config):
+        checks.extend(_linux_x11_checks(config.activation_shortcut))
     if check_input:
         backend = None
         input_error: Exception | None = None
@@ -359,8 +589,10 @@ def collect_checks(
         if input_error is None:
             checks.append(Check("input backend", True, input_detail))
         else:
-            if session == "X11":
-                remediation = "Check DISPLAY, xrandr, and pynput/XTest access."
+            if _linux_x11_selected(config):
+                remediation = (
+                    "See the X11 display, XTest, xrandr, and pynput capability checks above."
+                )
             elif session == "WAYLAND":
                 remediation = "Check /dev/uinput existence and user read/write permission."
             elif session == "macOS":
@@ -476,11 +708,19 @@ def report_json(config: AppConfig, checks: list[Check], runtime: bool = False) -
             ).as_dict()
         except Exception as exc:
             camera_data["error"] = str(exc)
+    check_data: list[dict[str, object]] = []
+    for check in checks:
+        item: dict[str, object] = {
+            "name": check.name,
+            "ok": check.ok,
+            "detail": check.detail,
+            "required": check.required,
+        }
+        if check.data is not None:
+            item["data"] = check.data
+        check_data.append(item)
     result: dict[str, object] = {
-        "checks": [
-            {"name": check.name, "ok": check.ok, "detail": check.detail, "required": check.required}
-            for check in checks
-        ],
+        "checks": check_data,
         "hardware": capabilities_dict(hardware),
         "compute": {"mode": request, "plan": plan_data},
         "camera": camera_data,
