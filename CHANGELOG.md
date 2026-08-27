@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-27
+
+### Added
+
+- Added physical hand selection modes (`right`, `left`, `either`, and `auto`) with stable two-hand locking and the same mouse gesture semantics for both hands.
+- Added explicit camera handedness interpretation controls (`--mirror auto|on|off`) and one-time tutorial confirmation so MediaPipe labels are normalized independently from preview mirroring and pointer mapping.
+- Added `mgesture update` for explicit stable-release updates and `mgesture update --check` for a no-download check.
+- Added `mgesture --reset --dry-run` to preview the exact mutable user-state reset plan.
+
+### Changed
+
+- Improved two-finger scrolling with palm-normalized finger reach/straightness, relaxed ring/pinky handling, thumb pinch-down arbitration, time-based entry, and active-state grace for brief landmark dropouts.
+- Extended tutorial and debug diagnostics with selected-hand status, scroll finger readiness, entry progress, active state, displacement, remainder, and block reason.
+- Bumped the native Mojo ABI to version 2 for the scroll exit-grace configuration while keeping the Python reference fallback and parity contract.
+
+### Fixed
+
+- Fixed physical left/right hand interpretation when the camera buffer and MediaPipe's mirrored-input convention differ.
+- Fixed natural two-finger scroll poses being rejected by the old single distance-ratio classifier or being reset by brief landmark jitter.
+- Fixed `mgesture --reset` recursively deleting standalone application files when the installer root shared the platform user-data directory.
+- Fixed Unix release activation during updates so replacing the `current` pointer does not move the new pointer into the old release directory.
+
+### Safety
+
+- Reset now validates an explicit mutable-path allowlist, protects executables, release roots, runtimes, models, and metadata, and removes symlinks without following them.
+- Updates verify the stable target manifest/checksum through the existing installer, stage and self-test before activation, and preserve user configuration and calibration on failure or success.
+
+### Platform
+
+- Kept preview mirroring, inference handedness interpretation, and pointer mirroring as independent cross-platform settings.
+- Added extracted-package reset-preservation coverage to the standalone release smoke path.
+
+### Documentation
+
+- Documented left/right hand control, mirror troubleshooting, precise scroll posing, update/reset ownership, and generic Linux/macOS/Windows platform terminology.
+
 ## [0.2.0] - 2026-08-27
 
 ### Added
