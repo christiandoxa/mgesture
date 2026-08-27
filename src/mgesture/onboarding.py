@@ -20,7 +20,10 @@ _STEPS = (
     ("Left click", "Pinch your thumb and index finger together, then release."),
     ("Hold and drag", "Keep the thumb-index pinch held while moving, then release."),
     ("Right click", "Pinch your thumb and middle finger together, then release."),
-    ("Scroll", "Use the two-finger pose, then move up and down."),
+    (
+        "Scroll",
+        "Raise index and middle, relax ring and pinky, hold until Scroll mode is active, then move up and down.",
+    ),
     ("Pause and resume", "Use the configured shortcut to pause, then press it again to resume."),
 )
 
@@ -183,9 +186,13 @@ def run_tutorial(config: AppConfig) -> int:
                     elif step == 5:
                         for event in events:
                             if event.kind == "scroll" and event.dy is not None:
-                                progress["up"] = progress.get("up", False) or event.dy > 0
-                                progress["down"] = progress.get("down", False) or event.dy < 0
-                        if progress.get("up") and progress.get("down"):
+                                progress["scroll_up"] = (
+                                    progress.get("scroll_up", False) or event.dy > 0
+                                )
+                                progress["scroll_down"] = (
+                                    progress.get("scroll_down", False) or event.dy < 0
+                                )
+                        if progress.get("scroll_up") and progress.get("scroll_down"):
                             last_success = "✓ Scroll up and down detected"
                             step = _advance(step, progress)
                     elif step == 6:
@@ -199,7 +206,7 @@ def run_tutorial(config: AppConfig) -> int:
                     lines = [
                         "Move pointer: selected hand's index finger | Left click: thumb + index",
                         "Hold/drag: keep left pinch | Right click: thumb + middle",
-                        "Scroll: two-finger pose | Pause/resume: configured shortcut or Space",
+                        "Scroll: index + middle up, ring + pinky relaxed | Pause/resume: shortcut or Space",
                         "Q/Escape or Ctrl+C exits safely. Press C to calibrate, or any other key to start.",
                         "K skips the tutorial at any time; all practice input is simulated.",
                     ]
@@ -221,6 +228,30 @@ def run_tutorial(config: AppConfig) -> int:
                         lines.append(f"Waiting for your {selected_hand_label} hand...")
                     elif step == 0:
                         lines.append(f"{selected_hand_label.title()} hand detected")
+                    elif step == 5:
+                        fingers_ready = batch.diagnostics.get("scroll_fingers_ready") is True
+                        raw_entry_progress = batch.diagnostics.get("scroll_entry_progress", 0.0)
+                        entry_progress = (
+                            float(raw_entry_progress)
+                            if isinstance(raw_entry_progress, (int, float))
+                            else 0.0
+                        )
+                        active = batch.state.value == "SCROLL"
+                        lines.extend(
+                            [
+                                "Finger readiness: "
+                                + (
+                                    "ready"
+                                    if fingers_ready
+                                    else "index + middle up; ring + pinky relaxed"
+                                ),
+                                f"Entry progress: {entry_progress:.0%}",
+                                "Scroll mode active"
+                                if active
+                                else "Hold pose until Scroll mode active",
+                                f"Motion: up {'✓' if progress.get('scroll_up') else '—'} | down {'✓' if progress.get('scroll_down') else '—'}",
+                            ]
+                        )
 
                 overlay = draw_overlay(
                     captured.image,

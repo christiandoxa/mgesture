@@ -162,6 +162,7 @@ class EngineConfig:
     hand_loss_timeout_ms: int = 250
     reacquisition_ms: int = 150
     scroll_entry_ms: int = 180
+    scroll_exit_grace_ms: int = 120
     scroll_sensitivity: float = 35.0
     scroll_direction: int = 1
     scroll_dead_zone: float = 0.001

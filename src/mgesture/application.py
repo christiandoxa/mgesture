@@ -58,6 +58,7 @@ def engine_config(config: AppConfig, backend: MouseBackend) -> EngineConfig:
                 "hand_loss_timeout_ms",
                 "reacquisition_ms",
                 "scroll_entry_ms",
+                "scroll_exit_grace_ms",
                 "scroll_sensitivity",
                 "scroll_direction",
                 "scroll_dead_zone",
@@ -378,6 +379,20 @@ class Application:
                                 (1.0 - value if index % 3 == 0 else value)
                                 for index, value in enumerate(display_landmarks)
                             )
+                    scroll_progress = batch.diagnostics.get("scroll_entry_progress")
+                    scroll_progress_text = (
+                        f"{float(scroll_progress):.0%}"
+                        if isinstance(scroll_progress, (int, float))
+                        else "-"
+                    )
+                    scroll_fingers = batch.diagnostics.get("scroll_fingers_ready")
+                    scroll_fingers_text = (
+                        "ready"
+                        if scroll_fingers is True
+                        else "not ready"
+                        if scroll_fingers is False
+                        else "-"
+                    )
                     lines = [
                         f"state: {batch.state.value}",
                         f"hand: {frame.handedness} | selection: {self.config.vision.hand_selection.value}",
@@ -389,6 +404,9 @@ class Application:
                         f"dropped: {landmarker.dropped_submissions + landmarker.dropped_results}",
                         f"index pinch: {batch.diagnostics.get('index_pinch', '-')}",
                         f"middle pinch: {batch.diagnostics.get('middle_pinch', '-')}",
+                        f"scroll fingers: {scroll_fingers_text} "
+                        f"entry: {scroll_progress_text} "
+                        f"active: {'yes' if batch.state.value == 'SCROLL' else 'no'}",
                         f"preprocess: {preprocess_ms:.2f}ms inference: {landmarker.last_inference_ms or 0.0:.2f}ms gesture: {gesture_ms:.2f}ms input: {dispatch_ms:.2f}ms total: {total_ms:.2f}ms",
                         "warning: low confidence/no selected hand" if not hand_tracked else "",
                         "SPACE arm/pause | Q/Esc emergency stop",

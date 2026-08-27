@@ -8,10 +8,18 @@ comptime ACTION_MOVE = Int32(1)
 comptime ACTION_BUTTON_DOWN = Int32(2)
 comptime ACTION_BUTTON_UP = Int32(3)
 comptime ACTION_SCROLL = Int32(4)
-comptime MGESTURE_MOJO_ABI_VERSION = Int32(1)
+comptime MGESTURE_MOJO_ABI_VERSION = Int32(2)
 comptime LANDMARK_COUNT = Int(63)
 comptime LANDMARK_ABS_LIMIT = Float64(2.0)
 comptime MIN_PALM_SCALE = Float64(0.0001)
+comptime SCROLL_ENTRY_REACH = Float64(0.88)
+comptime SCROLL_ACTIVE_REACH = Float64(0.78)
+comptime SCROLL_RELAXED_REACH = Float64(1.30)
+comptime SCROLL_ENTRY_STRAIGHTNESS = Float64(0.70)
+comptime SCROLL_ACTIVE_STRAIGHTNESS = Float64(0.60)
+comptime SCROLL_RELAXED_STRAIGHTNESS = Float64(0.82)
+comptime SCROLL_ACTIVE_RELAXED_STRAIGHTNESS = Float64(0.90)
+# ponytail: fixed normalized thresholds, calibrate per-hand geometry if camera diversity needs it
 
 comptime STATE_PAUSED = Int32(0)
 comptime STATE_ARMED = Int32(1)
@@ -45,6 +53,7 @@ struct MojoConfig(Copyable, Movable, Writable):
     var hand_loss_timeout_ms: Int64
     var reacquisition_ms: Int64
     var scroll_entry_ms: Int64
+    var scroll_exit_grace_ms: Int64
     var scroll_sensitivity: Float64
     var scroll_direction: Int32
     var scroll_dead_zone: Float64
@@ -71,7 +80,12 @@ struct Measurements(Copyable, Movable, Writable):
     var palm_y: Float64
     var index_x: Float64
     var index_y: Float64
+    var scroll_fingers_ready: Bool
+    var scroll_active_fingers_ready: Bool
+    var scroll_pinch_clear: Bool
+    var scroll_active_pinch_clear: Bool
     var scroll_pose: Bool
+    var scroll_active_pose: Bool
     var open_palm: Bool
 
 
@@ -98,6 +112,7 @@ struct GestureEngine(Copyable, Movable, Writable):
     var scroll_remainder: Float64
     var scroll_active: Bool
     var scroll_entry_since_ms: Int64
+    var scroll_exit_since_ms: Int64
     var open_since_ms: Int64
     var last_toggle_ms: Int64
     var initialized: Bool
@@ -128,6 +143,7 @@ struct GestureEngine(Copyable, Movable, Writable):
         self.scroll_remainder = 0.0
         self.scroll_active = False
         self.scroll_entry_since_ms = -2
+        self.scroll_exit_since_ms = -1
         self.open_since_ms = -1
         self.last_toggle_ms = 0
         self.initialized = False
@@ -162,9 +178,19 @@ struct GestureEngine(Copyable, Movable, Writable):
         self.scroll_remainder = 0.0
         self.scroll_active = False
         self.scroll_entry_since_ms = -2
+        self.scroll_exit_since_ms = -1
         self.open_since_ms = -1
         self.last_toggle_ms = 0
         self.initialized = False
+        self.filter_x = 0.0
+        self.filter_y = 0.0
+        self.filter_dx = 0.0
+        self.filter_dy = 0.0
+        self.filter_last_x = 0.0
+        self.filter_last_y = 0.0
+        self.filter_last_time = 0.0
+        self.filter_initialized = False
+        self.derivative_initialized = False
 
     def reset_transient(mut self):
         self.down_candidate = 0
@@ -178,6 +204,7 @@ struct GestureEngine(Copyable, Movable, Writable):
         self.scroll_remainder = 0.0
         self.scroll_active = False
         self.scroll_entry_since_ms = -2
+        self.scroll_exit_since_ms = -1
         self.open_since_ms = -1
         self.initialized = False
         self.filter_x = 0.0
@@ -235,8 +262,28 @@ struct GestureEngine(Copyable, Movable, Writable):
         return Self.palm_scale(landmarks) > MIN_PALM_SCALE
 
     @staticmethod
-    def finger_extended(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], tip: Int, pip: Int, mcp: Int) -> Bool:
-        return Self.distance(landmarks, tip, mcp) > Self.distance(landmarks, pip, mcp) * 1.25
+    def palm_center(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], axis: Int) -> Float64:
+        return (Self.coord(landmarks, 0, axis) + Self.coord(landmarks, 5, axis) + Self.coord(landmarks, 9, axis) + Self.coord(landmarks, 13, axis) + Self.coord(landmarks, 17, axis)) / 5.0
+
+    @staticmethod
+    def finger_reach(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], tip: Int, palm_scale: Float64) -> Float64:
+        var dx = Self.coord(landmarks, tip, 0) - Self.palm_center(landmarks, 0)
+        var dy = Self.coord(landmarks, tip, 1) - Self.palm_center(landmarks, 1)
+        var dz = Self.coord(landmarks, tip, 2) - Self.palm_center(landmarks, 2)
+        return sqrt(dx * dx + dy * dy + dz * dz) / max(palm_scale, 0.000001)
+
+    @staticmethod
+    def finger_straightness(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], tip: Int, pip: Int, mcp: Int) -> Float64:
+        var path = Self.distance(landmarks, mcp, pip) + Self.distance(landmarks, pip, tip)
+        return Self.distance(landmarks, mcp, tip) / max(path, 0.000001)
+
+    @staticmethod
+    def finger_extended(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], tip: Int, pip: Int, mcp: Int, palm_scale: Float64, min_reach: Float64, min_straightness: Float64) -> Bool:
+        return Self.finger_reach(landmarks, tip, palm_scale) >= min_reach and Self.finger_straightness(landmarks, tip, pip, mcp) >= min_straightness
+
+    @staticmethod
+    def finger_relaxed(landmarks: Pointer[mut=True, Float32, MutAnyOrigin], tip: Int, pip: Int, mcp: Int, palm_scale: Float64, max_reach: Float64, max_straightness: Float64) -> Bool:
+        return not (Self.finger_reach(landmarks, tip, palm_scale) >= max_reach and Self.finger_straightness(landmarks, tip, pip, mcp) >= max_straightness)
 
     def measure(self, landmarks: Pointer[mut=True, Float32, MutAnyOrigin]) -> Measurements:
         var palm_scale = max(0.000001, Self.palm_scale(landmarks))
@@ -246,13 +293,18 @@ struct GestureEngine(Copyable, Movable, Writable):
         var palm_y = (Self.coord(landmarks, 0, 1) + Self.coord(landmarks, 5, 1) + Self.coord(landmarks, 9, 1) + Self.coord(landmarks, 13, 1) + Self.coord(landmarks, 17, 1)) / 5.0
         var index_x = Self.coord(landmarks, 8, 0)
         var index_y = Self.coord(landmarks, 8, 1)
-        var index_extended = Self.finger_extended(landmarks, 8, 6, 5)
-        var middle_extended = Self.finger_extended(landmarks, 12, 10, 9)
-        var ring_extended = Self.finger_extended(landmarks, 16, 14, 13)
-        var pinky_extended = Self.finger_extended(landmarks, 20, 18, 17)
-        var scroll_pose = index_extended and middle_extended and not ring_extended and not pinky_extended and index_pinch > self.config.pinch_release_threshold and middle_pinch > self.config.pinch_release_threshold
+        var index_extended = Self.finger_extended(landmarks, 8, 6, 5, palm_scale, SCROLL_ENTRY_REACH, SCROLL_ENTRY_STRAIGHTNESS)
+        var middle_extended = Self.finger_extended(landmarks, 12, 10, 9, palm_scale, SCROLL_ENTRY_REACH, SCROLL_ENTRY_STRAIGHTNESS)
+        var ring_extended = Self.finger_extended(landmarks, 16, 14, 13, palm_scale, SCROLL_ENTRY_REACH, SCROLL_ENTRY_STRAIGHTNESS)
+        var pinky_extended = Self.finger_extended(landmarks, 20, 18, 17, palm_scale, SCROLL_ENTRY_REACH, SCROLL_ENTRY_STRAIGHTNESS)
         var open_palm = index_extended and middle_extended and ring_extended and pinky_extended
-        return Measurements(index_pinch, middle_pinch, palm_x, palm_y, index_x, index_y, scroll_pose, open_palm)
+        var scroll_fingers_ready = index_extended and middle_extended and Self.finger_relaxed(landmarks, 16, 14, 13, palm_scale, SCROLL_RELAXED_REACH, SCROLL_RELAXED_STRAIGHTNESS) and Self.finger_relaxed(landmarks, 20, 18, 17, palm_scale, SCROLL_RELAXED_REACH, SCROLL_RELAXED_STRAIGHTNESS) and not open_palm
+        var scroll_active_fingers_ready = Self.finger_extended(landmarks, 8, 6, 5, palm_scale, SCROLL_ACTIVE_REACH, SCROLL_ACTIVE_STRAIGHTNESS) and Self.finger_extended(landmarks, 12, 10, 9, palm_scale, SCROLL_ACTIVE_REACH, SCROLL_ACTIVE_STRAIGHTNESS) and Self.finger_relaxed(landmarks, 16, 14, 13, palm_scale, SCROLL_RELAXED_REACH, SCROLL_ACTIVE_RELAXED_STRAIGHTNESS) and Self.finger_relaxed(landmarks, 20, 18, 17, palm_scale, SCROLL_RELAXED_REACH, SCROLL_ACTIVE_RELAXED_STRAIGHTNESS) and not open_palm
+        var scroll_pinch_clear = index_pinch > self.config.pinch_release_threshold and middle_pinch > self.config.pinch_release_threshold
+        var scroll_active_pinch_clear = index_pinch > self.config.pinch_down_threshold and middle_pinch > self.config.pinch_down_threshold
+        var scroll_pose = scroll_fingers_ready and scroll_pinch_clear
+        var scroll_active_pose = scroll_active_fingers_ready and scroll_active_pinch_clear
+        return Measurements(index_pinch, middle_pinch, palm_x, palm_y, index_x, index_y, scroll_fingers_ready, scroll_active_fingers_ready, scroll_pinch_clear, scroll_active_pinch_clear, scroll_pose, scroll_active_pose, open_palm)
 
     @staticmethod
     def alpha(cutoff: Float64, dt: Float64) -> Float64:
@@ -311,14 +363,33 @@ struct GestureEngine(Copyable, Movable, Writable):
             return Self.result(ACTION_MOVE, out_x, out_y, 0, self.state)
         return Self.result(ACTION_NONE, out_x, out_y, 0, self.state)
 
+    def finish_scroll(mut self):
+        self.scroll_active = False
+        self.scroll_entry_since_ms = -2
+        self.scroll_exit_since_ms = -1
+        self.last_palm_y = -1.0
+        self.scroll_remainder = 0.0
+        self.last_x = -1.0
+        self.last_y = -1.0
+        self.filter_initialized = False
+        self.derivative_initialized = False
+        self.state = STATE_ARMED
+
     def process(mut self, landmarks: Pointer[mut=True, Float32, MutAnyOrigin], timestamp_ms: Int64, hand_selected: Int32, confidence: Float64) -> MojoAction:
         var valid = hand_selected != 0 and confidence == confidence and confidence >= 0.0 and confidence <= 1.0 and confidence >= self.config.handedness_confidence
         if valid:
             valid = Self.valid_landmarks(landmarks)
         if not valid:
             if self.invalid_since_ms < 0:
-                self.reset_transient()
+                if not self.scroll_active:
+                    self.reset_transient()
                 self.invalid_since_ms = timestamp_ms
+            if self.scroll_active:
+                if self.scroll_exit_since_ms < 0:
+                    self.scroll_exit_since_ms = timestamp_ms
+                    self.last_palm_y = -1.0
+                if timestamp_ms - self.scroll_exit_since_ms >= self.config.scroll_exit_grace_ms:
+                    self.finish_scroll()
             if timestamp_ms - self.invalid_since_ms >= self.config.hand_loss_timeout_ms:
                 self.active_hand = 0
                 return self.reset_internal()
@@ -414,46 +485,50 @@ struct GestureEngine(Copyable, Movable, Writable):
             pointer.state = STATE_ARMED
             return pointer^
 
-        if measurements.scroll_pose:
+        if self.scroll_active:
+            if measurements.scroll_active_pose:
+                if self.scroll_exit_since_ms >= 0:
+                    self.scroll_exit_since_ms = -1
+                    self.last_palm_y = measurements.palm_y
+                var dy = measurements.palm_y - self.last_palm_y
+                if abs(dy) > self.config.scroll_dead_zone:
+                    var direction = 1.0 if dy > 0.0 else -1.0
+                    var effective_dy = dy - direction * self.config.scroll_dead_zone
+                    self.last_palm_y = measurements.palm_y - direction * self.config.scroll_dead_zone
+                    self.scroll_remainder += -effective_dy * self.config.scroll_sensitivity * Float64(self.config.scroll_direction)
+                    var steps = Int32(self.scroll_remainder)
+                    if steps != 0:
+                        self.scroll_remainder -= Float64(steps)
+                        self.state = STATE_SCROLL
+                        return Self.result(ACTION_SCROLL, 0.0, Float64(steps), 0, self.state)
+                self.state = STATE_SCROLL
+                return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+            if self.scroll_exit_since_ms < 0:
+                self.scroll_exit_since_ms = timestamp_ms
+                self.last_palm_y = -1.0
+            if timestamp_ms - self.scroll_exit_since_ms < self.config.scroll_exit_grace_ms:
+                self.state = STATE_SCROLL
+                return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+            self.finish_scroll()
+        elif measurements.scroll_pose:
             if self.scroll_entry_since_ms < 0:
                 self.scroll_entry_since_ms = timestamp_ms
             if timestamp_ms - self.scroll_entry_since_ms >= self.config.scroll_entry_ms:
-                if not self.scroll_active:
-                    self.scroll_active = True
-                    self.last_palm_y = measurements.palm_y
-                    self.last_x = -1.0
-                    self.last_y = -1.0
-                    self.filter_initialized = False
-                    self.derivative_initialized = False
-                    self.state = STATE_SCROLL
-                    return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
-                var dy = measurements.palm_y - self.last_palm_y
-                if abs(dy) <= self.config.scroll_dead_zone:
-                    self.state = STATE_SCROLL
-                    return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
-                var direction = 1.0 if dy > 0.0 else -1.0
-                var effective_dy = dy - direction * self.config.scroll_dead_zone
-                self.last_palm_y = measurements.palm_y - direction * self.config.scroll_dead_zone
-                self.scroll_remainder += -effective_dy * self.config.scroll_sensitivity * Float64(self.config.scroll_direction)
-                var steps = Int32(self.scroll_remainder)
-                if steps != 0:
-                    self.scroll_remainder -= Float64(steps)
-                    self.state = STATE_SCROLL
-                    return Self.result(ACTION_SCROLL, 0.0, Float64(steps), 0, self.state)
-                self.state = STATE_SCROLL
-                return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
-        else:
-            self.scroll_entry_since_ms = -2
-            self.scroll_remainder = 0.0
-            if self.scroll_active:
-                self.scroll_active = False
+                self.scroll_active = True
+                self.scroll_exit_since_ms = -1
+                self.last_palm_y = measurements.palm_y
                 self.last_x = -1.0
                 self.last_y = -1.0
                 self.filter_initialized = False
                 self.derivative_initialized = False
-                self.state = STATE_ARMED
-                var pointer = self.pointer(measurements, timestamp_ms)
-                return pointer^
+                self.state = STATE_SCROLL
+                return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+            self.state = STATE_ARMED
+            return Self.result(ACTION_NONE, 0.0, 0.0, 0, self.state)
+        else:
+            self.scroll_entry_since_ms = -2
+            self.scroll_exit_since_ms = -1
+            self.scroll_remainder = 0.0
 
         self.down_candidate = 0
         self.down_since_ms = 0

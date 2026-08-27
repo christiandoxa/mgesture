@@ -26,7 +26,7 @@ from validate_architecture import validate_bundle as validate_bundle_architectur
 from validate_mojo_abi import validate as validate_mojo_abi  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
-from mgesture.engine.mojo_engine import native_library_name  # noqa: E402
+from mgesture.engine.mojo_engine import MOJO_ABI_VERSION, native_library_name  # noqa: E402
 from mgesture.release import mojo_source_metadata, mojo_source_paths  # noqa: E402
 from mgesture.vision.model_manager import available_model  # noqa: E402
 
@@ -222,9 +222,9 @@ def build(
             "vision_backend": "mediapipe",
             "minimum_os": release_target.minimum_os,
             "package_format": release_target.format,
-            "mojo_version": "mojo-abi-1" if native_mojo else "not bundled",
+            "mojo_version": f"mojo-abi-{MOJO_ABI_VERSION}" if native_mojo else "not bundled",
             "mojo_compiler_version": mojo_compiler_version,
-            "mojo_abi_version": 1 if native_mojo else None,
+            "mojo_abi_version": MOJO_ABI_VERSION if native_mojo else None,
             "mojo_library": native_library_name(release_target.os) if native_mojo else None,
             "mojo_library_arch": release_target.architecture if native_mojo else None,
             "mojo_library_sha256": mojo_library_sha256,
@@ -234,7 +234,7 @@ def build(
                 "source_files": source_metadata["files"],
                 "native_engine_available": native_mojo,
                 "native_engine_loaded": False,
-                "abi_version": 1 if native_mojo else None,
+                "abi_version": MOJO_ABI_VERSION if native_mojo else None,
                 "library": native_library_name(release_target.os) if native_mojo else None,
                 "library_arch": release_target.architecture if native_mojo else None,
                 "library_sha256": mojo_library_sha256,

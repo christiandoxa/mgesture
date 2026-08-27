@@ -75,6 +75,21 @@ def _palm_offset(points, offset):
     return tuple(values)
 
 
+def _scroll_hand(index_y=0.25, ring_y=0.50, pinky_y=0.55):
+    values = list(hand(scroll=True, index=(0.45, index_y)))
+    values[16 * 3 + 1] = ring_y
+    values[20 * 3 + 1] = pinky_y
+    return tuple(values)
+
+
+def _translate_hand(points, dx=0.0, dy=0.0):
+    values = list(points)
+    for point in range(21):
+        values[point * 3] += dx
+        values[point * 3 + 1] += dy
+    return tuple(values)
+
+
 def test_center_mapping_and_negative_desktop_bounds():
     gesture = PythonGestureEngine(
         EngineConfig(
@@ -220,6 +235,149 @@ def test_scroll_requires_stable_pose_and_accumulates_vertical_steps():
         moved[landmark * 3 + 1] += 0.1
     batch = gesture.process(frame(160, tuple(moved)))
     assert any(action.type.value == "scroll" and action.dy != 0 for action in batch.actions)
+
+
+def test_scroll_accepts_bent_index_and_relaxed_fingers_with_progress():
+    points = _scroll_hand(index_y=0.36, ring_y=0.43, pinky_y=0.50)
+    gesture = engine(scroll_entry_ms=100)
+
+    first = gesture.process(frame(0, points))
+    halfway = gesture.process(frame(50, points))
+    active = gesture.process(frame(100, points))
+
+    assert first.diagnostics["scroll_fingers_ready"] is True
+    assert halfway.state is GestureState.ARMED
+    assert halfway.diagnostics["scroll_entry_progress"] == 0.5
+    assert active.state is GestureState.SCROLL
+    assert active.diagnostics["scroll_active"] is True
+
+
+def test_scroll_pose_jitter_and_open_fingers_never_enter():
+    gesture = engine(scroll_entry_ms=100)
+    actions = []
+    for index in range(30):
+        points = (
+            _scroll_hand(index_y=0.36, ring_y=0.43, pinky_y=0.50)
+            if index % 2
+            else _scroll_hand(index_y=0.38, ring_y=0.43, pinky_y=0.50)
+        )
+        actions.extend(gesture.process(frame(index * 33, points)).actions)
+
+    assert gesture.state is GestureState.ARMED
+    assert not [action for action in actions if action.type.value == "scroll"]
+
+
+def test_scroll_open_palm_jitter_never_enters():
+    gesture = engine(scroll_entry_ms=100)
+    actions = []
+    for index in range(30):
+        points = (
+            _scroll_hand(index_y=0.36, ring_y=0.20, pinky_y=0.20)
+            if index % 2
+            else hand(open_palm=True)
+        )
+        actions.extend(gesture.process(frame(index * 33, points)).actions)
+
+    assert gesture.state is GestureState.ARMED
+    assert not [action for action in actions if action.type.value == "scroll"]
+
+
+def test_scroll_positive_landmark_jitter_stays_active_without_wheel_noise():
+    rng = random.Random(20260827)
+    gesture = engine(
+        scroll_entry_ms=100,
+        scroll_exit_grace_ms=80,
+        scroll_dead_zone=0.002,
+        scroll_sensitivity=1000,
+    )
+    points = _scroll_hand(index_y=0.36, ring_y=0.43, pinky_y=0.50)
+    actions = []
+    for index in range(60):
+        jittered = _translate_hand(points, dy=rng.uniform(-0.0006, 0.0006))
+        actions.extend(gesture.process(frame(index * 33, jittered)).actions)
+
+    assert gesture.state is GestureState.SCROLL
+    assert not [action for action in actions if action.type.value == "scroll"]
+
+
+def test_scroll_active_survives_brief_landmark_dropout_and_rebases_anchor():
+    gesture = engine(scroll_entry_ms=0, scroll_exit_grace_ms=80, scroll_sensitivity=20)
+    points = _scroll_hand(index_y=0.36, ring_y=0.43, pinky_y=0.50)
+
+    entered = gesture.process(frame(0, points))
+    dropout = gesture.process(frame(40, (0.0,) * 63))
+    recovered = gesture.process(frame(80, _translate_hand(points, dy=0.04)))
+    moved = gesture.process(frame(120, _translate_hand(points, dy=0.10)))
+
+    assert entered.state is GestureState.SCROLL
+    assert dropout.state is GestureState.SCROLL
+    assert dropout.diagnostics["scroll_exit_grace"] is True
+    assert recovered.state is GestureState.SCROLL
+    assert not [action for action in recovered.actions if action.type.value == "scroll"]
+    assert any(action.type.value == "scroll" for action in moved.actions)
+
+    gesture.process(frame(220, (0.0,) * 63))
+    expired = gesture.process(frame(320, (0.0,) * 63))
+    assert expired.state is GestureState.ARMED
+
+
+def test_scroll_active_hysteresis_tolerates_thumb_drift_without_clicking():
+    gesture = engine(scroll_entry_ms=0, scroll_exit_grace_ms=80)
+    points = list(_scroll_hand())
+    points[4 * 3 : 4 * 3 + 3] = (0.45, 0.40, 0.0)
+
+    entered = gesture.process(frame(0, _scroll_hand()))
+    drifted = gesture.process(frame(40, tuple(points)))
+
+    assert entered.state is GestureState.SCROLL
+    assert drifted.state is GestureState.SCROLL
+    assert drifted.diagnostics["scroll_pinch_clear"] is False
+    assert drifted.diagnostics["scroll_active_pinch_clear"] is True
+    assert not [action for action in drifted.actions if action.button]
+
+
+def test_scroll_direction_and_fractional_accumulator_are_stable():
+    gesture = engine(
+        scroll_entry_ms=0,
+        scroll_sensitivity=20,
+        scroll_dead_zone=0.01,
+    )
+    points = _scroll_hand()
+    actions = [gesture.process(frame(0, points))]
+    for timestamp, offset in ((33, 0.02), (66, 0.04), (99, 0.06), (132, -0.06)):
+        actions.append(gesture.process(frame(timestamp, _translate_hand(points, dy=offset))))
+
+    scroll_values = [
+        action.dy for batch in actions for action in batch.actions if action.type.value == "scroll"
+    ]
+    assert scroll_values == [-1.0, 2.0]
+
+    inverted = engine(
+        scroll_entry_ms=0,
+        scroll_sensitivity=20,
+        scroll_dead_zone=0.01,
+        scroll_direction=-1,
+    )
+    inverted.process(frame(0, points))
+    batch = inverted.process(frame(33, _translate_hand(points, dy=0.06)))
+    assert [action.dy for action in batch.actions if action.type.value == "scroll"] == [1.0]
+
+
+def test_scroll_never_preempts_pinch_or_drag():
+    gesture = engine(scroll_entry_ms=0)
+
+    def left_scroll_pinch(index=(0.45, 0.25)):
+        values = list(hand(scroll=True, pinch="left", index=index))
+        values[12 * 3 + 1] = 0.10
+        return tuple(values)
+
+    gesture.process(frame(0, left_scroll_pinch()))
+    down = gesture.process(frame(80, left_scroll_pinch()))
+    drag = gesture.process(frame(120, left_scroll_pinch((0.75, 0.75))))
+
+    assert any(action.button is Button.LEFT for action in down.actions)
+    assert not [action for action in drag.actions if action.type.value == "scroll"]
+    assert gesture._held is Button.LEFT
 
 
 def test_pause_releases_every_button_and_is_idempotent():

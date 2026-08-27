@@ -1,8 +1,18 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from mgesture import config
-from mgesture.config import config_text, load_config, with_overrides, write_config
+from mgesture.config import (
+    AppConfig,
+    GestureConfig,
+    config_text,
+    load_config,
+    validate,
+    with_overrides,
+    write_config,
+)
 from mgesture.engine import HandSelection
 
 
@@ -13,7 +23,9 @@ def test_config_round_trip(tmp_path: Path):
     assert loaded.camera.mirror is True
     assert loaded.compute.mode == "auto"
     assert loaded.vision.hand_selection is HandSelection.RIGHT
+    assert loaded.gesture.scroll_exit_grace_ms == 120
     assert "[performance]" in config_text(loaded)
+    assert "scroll_exit_grace_ms = 120" in config_text(loaded)
 
 
 def test_hand_selection_config_round_trip_and_override(tmp_path: Path):
@@ -37,6 +49,11 @@ def test_onboarding_state_round_trip(tmp_path: Path, monkeypatch):
     config.set_onboarding_completed()
     assert config.onboarding_completed() is True
     assert json.loads(state.read_text())["schema_version"] == 1
+
+
+def test_scroll_exit_grace_must_be_nonnegative():
+    with pytest.raises(ValueError, match="scroll_exit_grace_ms"):
+        validate(AppConfig(gesture=GestureConfig(scroll_exit_grace_ms=-1)))
 
 
 def test_reset_removes_only_owned_user_directories(tmp_path: Path, monkeypatch):

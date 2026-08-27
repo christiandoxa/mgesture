@@ -17,6 +17,6 @@ Left and right selections use the same landmark indices and gesture mapping; phy
 
 Pointer mapping mirrors X by default, maps the inner active region to the selected monitor/virtual desktop, clamps coordinates, filters with an FPS-aware One Euro filter, and suppresses the first reacquisition interval.
 
-Scroll uses index/middle extended, ring/pinky folded, and both thumb-pinch distances outside their release hysteresis. Entry is delayed for stability; palm displacement uses a dead-zone anchor and accumulates fractional wheel steps. Buttons suppress scrolling.
+Scroll uses palm-normalized index/middle reach and straightness, relaxed (not fully extended) ring/pinky fingers, and both thumb-pinch distances outside their release hysteresis. Entry is delayed for stability; active scroll tolerates brief finger or landmark dropouts before exiting. Palm displacement uses a dead-zone anchor and accumulates fractional wheel steps. Buttons suppress scrolling.
 
 The app begins paused. Space toggles through the preview, and the optional open-palm hold gesture uses a cooldown. The selected physical hand stays locked while both hands are visible; a stable hand switch resets the gesture engine and releases any held button before the replacement hand can act. Right pinch wins an ambiguous new pinch frame; held buttons never switch sides. Nonfinite, out-of-bounds, or degenerate landmarks are treated as hand loss: no click or scroll is emitted, the pointer filter resets on reacquisition, and held buttons are released after the configured timeout.

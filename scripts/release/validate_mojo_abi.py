@@ -10,10 +10,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "release"))
+sys.path.insert(0, str(ROOT / "src"))
 
 from build_mojo_library import MOJO_EXPORTS, find_windows_tool  # noqa: E402
 from release_targets import target  # noqa: E402
 from validate_architecture import binary_architectures  # noqa: E402
+
+from mgesture.engine.mojo_engine import MOJO_ABI_VERSION  # noqa: E402
 
 
 def _symbols(path: Path, system: str) -> str:
@@ -56,7 +59,7 @@ def validate(target_name: str, library: Path) -> None:
     loaded = ctypes.CDLL(str(library))
     version = loaded.mgesture_mojo_abi_version
     version.restype = ctypes.c_int32
-    if version() != 1:
+    if version() != MOJO_ABI_VERSION:
         raise ValueError("native Mojo ABI version mismatch")
     print(
         f"validated native Mojo ABI for {target_name}: "

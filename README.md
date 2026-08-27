@@ -40,7 +40,7 @@ Use your right hand by default. Select another physical hand with `mgesture run 
 | Drag and drop | Keep the left pinch held while moving |
 | Right click | Pinch thumb and middle finger, then release |
 | Right hold | Keep thumb and middle finger pinched |
-| Scroll | Extend index and middle fingers, fold ring and pinky, then move vertically |
+| Scroll | Raise index and middle fingers, relax ring and pinky, hold until Scroll mode is active, then move vertically |
 | Pause / resume | Use the configured shortcut or the optional open-palm gesture |
 | Exit safely | Press Q/Escape in the preview or Ctrl+C in the terminal |
 

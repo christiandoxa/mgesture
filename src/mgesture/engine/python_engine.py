@@ -17,6 +17,14 @@ from .models import (
 _LANDMARK_COUNT = 63
 _LANDMARK_ABS_LIMIT = 2.0
 _MIN_PALM_SCALE = 1e-4
+_SCROLL_ENTRY_REACH = 0.88
+_SCROLL_ACTIVE_REACH = 0.78
+_SCROLL_RELAXED_REACH = 1.30
+_SCROLL_ENTRY_STRAIGHTNESS = 0.70
+_SCROLL_ACTIVE_STRAIGHTNESS = 0.60
+_SCROLL_RELAXED_STRAIGHTNESS = 0.82
+_SCROLL_ACTIVE_RELAXED_STRAIGHTNESS = 0.90
+# ponytail: fixed normalized thresholds, calibrate per-hand geometry if camera diversity needs it
 
 
 def _distance(landmarks: Sequence[float], first: int, second: int) -> float:
@@ -34,8 +42,52 @@ def _xy(landmarks: Sequence[float], index: int) -> tuple[float, float]:
     return landmarks[offset], landmarks[offset + 1]
 
 
+def _point(landmarks: Sequence[float], index: int) -> tuple[float, float, float]:
+    offset = index * 3
+    return landmarks[offset], landmarks[offset + 1], landmarks[offset + 2]
+
+
 def _palm_scale(landmarks: Sequence[float]) -> float:
     return 0.5 * (_distance(landmarks, 0, 9) + _distance(landmarks, 5, 17))
+
+
+def _palm_center(landmarks: Sequence[float]) -> tuple[float, float, float]:
+    palm_points = (0, 5, 9, 13, 17)
+    return (
+        sum(_point(landmarks, point)[0] for point in palm_points) / len(palm_points),
+        sum(_point(landmarks, point)[1] for point in palm_points) / len(palm_points),
+        sum(_point(landmarks, point)[2] for point in palm_points) / len(palm_points),
+    )
+
+
+def _finger_geometry(
+    landmarks: Sequence[float],
+    tip: int,
+    pip: int,
+    mcp: int,
+    palm_center: tuple[float, float, float],
+    palm_scale: float,
+) -> tuple[float, float]:
+    path = _distance(landmarks, mcp, pip) + _distance(landmarks, pip, tip)
+    straightness = _distance(landmarks, mcp, tip) / max(path, 1e-6)
+    reach = math.dist(_point(landmarks, tip), palm_center) / max(palm_scale, 1e-6)
+    return reach, straightness
+
+
+def _is_extended(
+    geometry: tuple[float, float],
+    reach: float = _SCROLL_ENTRY_REACH,
+    straightness: float = _SCROLL_ENTRY_STRAIGHTNESS,
+) -> bool:
+    return geometry[0] >= reach and geometry[1] >= straightness
+
+
+def _is_relaxed(
+    geometry: tuple[float, float],
+    reach: float = _SCROLL_RELAXED_REACH,
+    straightness: float = _SCROLL_RELAXED_STRAIGHTNESS,
+) -> bool:
+    return not (geometry[0] >= reach and geometry[1] >= straightness)
 
 
 class _LowPass:
@@ -109,7 +161,12 @@ class _Measurements:
     palm_y: float
     index_x: float
     index_y: float
+    scroll_fingers_ready: bool
+    scroll_active_fingers_ready: bool
+    scroll_pinch_clear: bool
+    scroll_active_pinch_clear: bool
     scroll_pose: bool
+    scroll_active_pose: bool
     open_palm: bool
 
 
@@ -131,7 +188,8 @@ class PythonGestureEngine:
         self._down_since: float | None = None
         self._release_since: float | None = None
         self._scroll_since: float | None = None
-        self._scroll_last: tuple[float, float] | None = None
+        self._scroll_exit_since: float | None = None
+        self._scroll_anchor: tuple[float, float] | None = None
         self._scroll_remainder = 0.0
         self._open_since: float | None = None
         self._last_toggle: float = -math.inf
@@ -178,11 +236,15 @@ class PythonGestureEngine:
         self._down_candidate = None
         self._down_since = None
         self._release_since = None
-        self._scroll_since = None
-        self._scroll_last = None
-        self._scroll_remainder = 0.0
+        self._reset_scroll()
         self._open_since = None
         self._last_pointer = None
+
+    def _reset_scroll(self) -> None:
+        self._scroll_since = None
+        self._scroll_exit_since = None
+        self._scroll_anchor = None
+        self._scroll_remainder = 0.0
 
     @staticmethod
     def _valid_landmarks(landmarks: Sequence[float]) -> bool:
@@ -203,14 +265,44 @@ class PythonGestureEngine:
         palm_x = sum(_xy(landmarks, point)[0] for point in palm_points) / len(palm_points)
         palm_y = sum(_xy(landmarks, point)[1] for point in palm_points) / len(palm_points)
         index_x, index_y = _xy(landmarks, 8)
-        index_extended = self._finger_extended(landmarks, 8, 6, 5)
-        middle_extended = self._finger_extended(landmarks, 12, 10, 9)
-        ring_extended = self._finger_extended(landmarks, 16, 14, 13)
-        pinky_extended = self._finger_extended(landmarks, 20, 18, 17)
-        scroll_pose = (
-            index_extended and middle_extended and not ring_extended and not pinky_extended
-        )
+        palm_center = _palm_center(landmarks)
+        index_geometry = _finger_geometry(landmarks, 8, 6, 5, palm_center, palm_scale)
+        middle_geometry = _finger_geometry(landmarks, 12, 10, 9, palm_center, palm_scale)
+        ring_geometry = _finger_geometry(landmarks, 16, 14, 13, palm_center, palm_scale)
+        pinky_geometry = _finger_geometry(landmarks, 20, 18, 17, palm_center, palm_scale)
+        index_extended = _is_extended(index_geometry)
+        middle_extended = _is_extended(middle_geometry)
+        ring_extended = _is_extended(ring_geometry)
+        pinky_extended = _is_extended(pinky_geometry)
         open_palm = index_extended and middle_extended and ring_extended and pinky_extended
+        scroll_fingers_ready = (
+            index_extended
+            and middle_extended
+            and _is_relaxed(ring_geometry)
+            and _is_relaxed(pinky_geometry)
+            and not open_palm
+        )
+        scroll_active_fingers_ready = (
+            _is_extended(index_geometry, _SCROLL_ACTIVE_REACH, _SCROLL_ACTIVE_STRAIGHTNESS)
+            and _is_extended(middle_geometry, _SCROLL_ACTIVE_REACH, _SCROLL_ACTIVE_STRAIGHTNESS)
+            and _is_relaxed(
+                ring_geometry, _SCROLL_RELAXED_REACH, _SCROLL_ACTIVE_RELAXED_STRAIGHTNESS
+            )
+            and _is_relaxed(
+                pinky_geometry, _SCROLL_RELAXED_REACH, _SCROLL_ACTIVE_RELAXED_STRAIGHTNESS
+            )
+            and not open_palm
+        )
+        scroll_pinch_clear = (
+            index_pinch > self.config.pinch_release_threshold
+            and middle_pinch > self.config.pinch_release_threshold
+        )
+        scroll_active_pinch_clear = (
+            index_pinch > self.config.pinch_down_threshold
+            and middle_pinch > self.config.pinch_down_threshold
+        )
+        scroll_pose = scroll_fingers_ready and scroll_pinch_clear
+        scroll_active_pose = scroll_active_fingers_ready and scroll_active_pinch_clear
         return _Measurements(
             index_pinch,
             middle_pinch,
@@ -218,9 +310,12 @@ class PythonGestureEngine:
             palm_y,
             index_x,
             index_y,
-            scroll_pose
-            and index_pinch > self.config.pinch_release_threshold
-            and middle_pinch > self.config.pinch_release_threshold,
+            scroll_fingers_ready,
+            scroll_active_fingers_ready,
+            scroll_pinch_clear,
+            scroll_active_pinch_clear,
+            scroll_pose,
+            scroll_active_pose,
             open_palm,
         )
 
@@ -234,16 +329,14 @@ class PythonGestureEngine:
             "palm_y": measurements.palm_y,
             "index_x": measurements.index_x,
             "index_y": measurements.index_y,
+            "scroll_fingers_ready": measurements.scroll_fingers_ready,
+            "scroll_active_fingers_ready": measurements.scroll_active_fingers_ready,
+            "scroll_pinch_clear": measurements.scroll_pinch_clear,
+            "scroll_active_pinch_clear": measurements.scroll_active_pinch_clear,
             "scroll_pose": measurements.scroll_pose,
+            "scroll_active_pose": measurements.scroll_active_pose,
             "open_palm": measurements.open_palm,
         }
-
-    @staticmethod
-    def _finger_extended(landmarks: Sequence[float], tip: int, pip: int, mcp: int) -> bool:
-        # Image-space y is not used: distance ratio survives mirrored input and small rotations.
-        tip_to_mcp = _distance(landmarks, tip, mcp)
-        pip_to_mcp = _distance(landmarks, pip, mcp)
-        return tip_to_mcp > pip_to_mcp * 1.25
 
     def _open_palm_toggle(
         self, measurements: _Measurements, now: float, actions: list[Action]
@@ -322,16 +415,16 @@ class PythonGestureEngine:
 
     def _scroll(self, measurements: _Measurements, actions: list[Action]) -> None:
         current = (measurements.palm_x, measurements.palm_y)
-        if self._scroll_last is None:
-            self._scroll_last = current
+        if self._scroll_anchor is None:
+            self._scroll_anchor = current
             return
-        _, last_y = self._scroll_last
+        _, last_y = self._scroll_anchor
         dy = current[1] - last_y
         if abs(dy) <= self.config.scroll_dead_zone:
             return
         direction = 1.0 if dy > 0.0 else -1.0
         effective_dy = dy - direction * self.config.scroll_dead_zone
-        self._scroll_last = (current[0], current[1] - direction * self.config.scroll_dead_zone)
+        self._scroll_anchor = (current[0], current[1] - direction * self.config.scroll_dead_zone)
         self._scroll_remainder += (
             -effective_dy * self.config.scroll_sensitivity * self.config.scroll_direction
         )
@@ -339,6 +432,20 @@ class PythonGestureEngine:
         if steps:
             self._scroll_remainder -= steps
             actions.append(Action.scroll(0.0, float(steps)))
+
+    def _scroll_entry_progress(self, now: float) -> float:
+        if self.state is GestureState.SCROLL:
+            return 1.0
+        if self._scroll_since is None:
+            return 0.0
+        duration = self.config.scroll_entry_ms / 1000.0
+        return 1.0 if duration <= 0.0 else min(1.0, max(0.0, (now - self._scroll_since) / duration))
+
+    def _finish_scroll(self, actions: list[Action]) -> None:
+        self._reset_scroll()
+        self.filter.reset()
+        self._last_pointer = None
+        self._state_action(GestureState.ARMED, actions)
 
     def process(self, frame: LandmarkFrame) -> ActionBatch:
         now = frame.timestamp_ms / 1000.0
@@ -361,8 +468,15 @@ class PythonGestureEngine:
                 valid = False
         if not valid:
             if self._invalid_since is None:
-                self._reset_transient()
+                if self.state is not GestureState.SCROLL:
+                    self._reset_transient()
                 self._invalid_since = now
+            if self.state is GestureState.SCROLL:
+                if self._scroll_exit_since is None:
+                    self._scroll_exit_since = now
+                    self._scroll_anchor = None
+                if now - self._scroll_exit_since >= self.config.scroll_exit_grace_ms / 1000.0:
+                    self._finish_scroll(actions)
             if now - self._invalid_since >= self.config.hand_loss_timeout_ms / 1000.0:
                 self._release_held(actions)
                 self._reset_transient()
@@ -370,7 +484,22 @@ class PythonGestureEngine:
                 self._state_action(
                     GestureState.ARMED if self.armed else GestureState.PAUSED, actions
                 )
-            return self._result(actions, {"valid_hand": False, "hand_loss": True})
+            return self._result(
+                actions,
+                {
+                    "valid_hand": False,
+                    "hand_loss": True,
+                    "scroll_fingers_ready": False,
+                    "scroll_active_fingers_ready": False,
+                    "scroll_pinch_clear": False,
+                    "scroll_active_pinch_clear": False,
+                    "scroll_pose": False,
+                    "scroll_active_pose": False,
+                    "scroll_active": self.state is GestureState.SCROLL,
+                    "scroll_entry_progress": self._scroll_entry_progress(now),
+                    "scroll_exit_grace": self._scroll_exit_since is not None,
+                },
+            )
 
         if self._active_hand is not None and physical_hand is not self._active_hand:
             self._release_held(actions)
@@ -403,7 +532,15 @@ class PythonGestureEngine:
             "reacquiring": reacquiring,
             "index_pinch": measurements.index_pinch,
             "middle_pinch": measurements.middle_pinch,
+            "scroll_fingers_ready": measurements.scroll_fingers_ready,
+            "scroll_active_fingers_ready": measurements.scroll_active_fingers_ready,
+            "scroll_pinch_clear": measurements.scroll_pinch_clear,
+            "scroll_active_pinch_clear": measurements.scroll_active_pinch_clear,
             "scroll_pose": measurements.scroll_pose,
+            "scroll_active_pose": measurements.scroll_active_pose,
+            "scroll_active": self.state is GestureState.SCROLL,
+            "scroll_entry_progress": self._scroll_entry_progress(now),
+            "scroll_exit_grace": self._scroll_exit_since is not None,
             "engine": self.name,
         }
         if not self.armed or reacquiring:
@@ -447,25 +584,48 @@ class PythonGestureEngine:
             actions.append(Action.button_down(Button.LEFT))
             return self._result(actions, diagnostics)
 
-        if measurements.scroll_pose:
+        if self.state is GestureState.SCROLL:
+            if measurements.scroll_active_pose:
+                if self._scroll_exit_since is not None:
+                    self._scroll_exit_since = None
+                    self._scroll_anchor = (measurements.palm_x, measurements.palm_y)
+                self._scroll(measurements, actions)
+                diagnostics["scroll_active"] = True
+                diagnostics["scroll_exit_grace"] = False
+                diagnostics["scroll_entry_progress"] = 1.0
+                return self._result(actions, diagnostics)
+            if self._scroll_exit_since is None:
+                self._scroll_exit_since = now
+                self._scroll_anchor = None
+            if now - self._scroll_exit_since < self.config.scroll_exit_grace_ms / 1000.0:
+                diagnostics["scroll_active"] = True
+                diagnostics["scroll_exit_grace"] = True
+                diagnostics["scroll_entry_progress"] = 1.0
+                return self._result(actions, diagnostics)
+            self._finish_scroll(actions)
+            diagnostics["scroll_active"] = False
+            diagnostics["scroll_exit_grace"] = False
+            diagnostics["scroll_entry_progress"] = 0.0
+        elif measurements.scroll_pose:
             if self._scroll_since is None:
                 self._scroll_since = now
             if now - self._scroll_since >= self.config.scroll_entry_ms / 1000.0:
-                if self.state != GestureState.SCROLL:
-                    self._state_action(GestureState.SCROLL, actions)
-                    self._scroll_last = (measurements.palm_x, measurements.palm_y)
-                    self.filter.reset()
-                    self._last_pointer = None
-                self._scroll(measurements, actions)
-                return self._result(actions, diagnostics)
-        else:
-            self._scroll_since = None
-            self._scroll_last = None
-            self._scroll_remainder = 0.0
-            if self.state is GestureState.SCROLL:
+                self._state_action(GestureState.SCROLL, actions)
+                self._scroll_anchor = (measurements.palm_x, measurements.palm_y)
+                self._scroll_exit_since = None
                 self.filter.reset()
                 self._last_pointer = None
-                self._state_action(GestureState.ARMED, actions)
+                self._scroll(measurements, actions)
+                diagnostics["scroll_active"] = True
+                diagnostics["scroll_entry_progress"] = 1.0
+                return self._result(actions, diagnostics)
+            diagnostics["scroll_entry_progress"] = self._scroll_entry_progress(now)
+            return self._result(actions, diagnostics)
+        else:
+            self._reset_scroll()
+            diagnostics["scroll_active"] = False
+            diagnostics["scroll_entry_progress"] = 0.0
+            diagnostics["scroll_exit_grace"] = False
 
         pointer = self._pointer(measurements, now)
         if pointer is not None:

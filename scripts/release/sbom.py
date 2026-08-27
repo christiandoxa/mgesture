@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "release"))
 
 from release_targets import publishable_targets  # noqa: E402
 
-from mgesture.engine.mojo_engine import native_library_name  # noqa: E402
+from mgesture.engine.mojo_engine import MOJO_ABI_VERSION, native_library_name  # noqa: E402
 from mgesture.release import mojo_source_metadata  # noqa: E402
 
 
@@ -93,7 +93,7 @@ def generate(output: Path, version: str, assets: Path | None = None) -> None:
                 {
                     "SPDXID": identifier,
                     "name": f"mgesture-mojo-native-{name}",
-                    "versionInfo": f"abi-1+{library_digest[:16]}",
+                    "versionInfo": f"abi-{MOJO_ABI_VERSION}+{library_digest[:16]}",
                     "downloadLocation": "NOASSERTION",
                     "licenseConcluded": "Apache-2.0",
                     "licenseDeclared": "Apache-2.0",

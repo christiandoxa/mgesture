@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "release"))
 from release_targets import publishable_targets  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
-from mgesture.engine.mojo_engine import native_library_name  # noqa: E402
+from mgesture.engine.mojo_engine import MOJO_ABI_VERSION, native_library_name  # noqa: E402
 from mgesture.release import mojo_source_metadata  # noqa: E402
 
 
@@ -135,7 +135,7 @@ def verify(directory: Path, version: str | None = None) -> None:
             or target["mojo_source"] is not expected.mojo_source
             or target["native_mojo_engine"] is not expected.native_mojo_engine
             or target["native_mojo_engine_loaded"] is not expected.native_mojo_engine
-            or (target["native_mojo_engine"] and target["mojo_abi_version"] != 1)
+            or (target["native_mojo_engine"] and target["mojo_abi_version"] != MOJO_ABI_VERSION)
             or target["mojo_library"]
             != (native_library_name(expected.os) if expected.native_mojo_engine else None)
             or target["mojo_library_arch"]

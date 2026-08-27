@@ -19,7 +19,7 @@ from .models import (
     PhysicalHand,
 )
 
-MOJO_ABI_VERSION = 1
+MOJO_ABI_VERSION = 2
 _LANDMARK_COUNT = 63
 _ACTION_NONE = 0
 _ACTION_MOVE = 1
@@ -67,6 +67,7 @@ class _NativeConfig(ctypes.Structure):
         ("hand_loss_timeout_ms", ctypes.c_int64),
         ("reacquisition_ms", ctypes.c_int64),
         ("scroll_entry_ms", ctypes.c_int64),
+        ("scroll_exit_grace_ms", ctypes.c_int64),
         ("scroll_sensitivity", ctypes.c_double),
         ("scroll_direction", ctypes.c_int32),
         ("scroll_dead_zone", ctypes.c_double),
@@ -100,7 +101,7 @@ class NativeMojoGestureEngine:
     """Persistent ctypes boundary for a compiler-free native Mojo engine."""
 
     name = "mojo"
-    version = "mojo-abi-1"
+    version = f"mojo-abi-{MOJO_ABI_VERSION}"
 
     def __init__(
         self, library_path: Path, config: EngineConfig, armed: bool = False, target: str = ""
@@ -152,6 +153,7 @@ class NativeMojoGestureEngine:
             config.hand_loss_timeout_ms,
             config.reacquisition_ms,
             config.scroll_entry_ms,
+            config.scroll_exit_grace_ms,
             config.scroll_sensitivity,
             config.scroll_direction,
             config.scroll_dead_zone,

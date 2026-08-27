@@ -79,6 +79,7 @@ class GestureConfig:
     hand_loss_timeout_ms: int = 250
     reacquisition_ms: int = 150
     scroll_entry_ms: int = 180
+    scroll_exit_grace_ms: int = 120
     scroll_sensitivity: float = 35.0
     scroll_direction: int = 1
     scroll_dead_zone: float = 0.001
@@ -429,6 +430,14 @@ def validate(config: AppConfig) -> AppConfig:
         errors.append("gesture active margins must be in [0, 0.5) and leave an active region")
     if config.gesture.pinch_down_threshold >= config.gesture.pinch_release_threshold:
         errors.append("gesture pinch_down_threshold must be below pinch_release_threshold")
+    if config.gesture.scroll_entry_ms < 0:
+        errors.append("gesture.scroll_entry_ms must be >= 0")
+    if config.gesture.scroll_exit_grace_ms < 0:
+        errors.append("gesture.scroll_exit_grace_ms must be >= 0")
+    if config.gesture.scroll_sensitivity <= 0.0:
+        errors.append("gesture.scroll_sensitivity must be > 0")
+    if config.gesture.scroll_dead_zone < 0.0:
+        errors.append("gesture.scroll_dead_zone must be >= 0")
     if config.gesture.scroll_direction not in (-1, 1):
         errors.append("gesture.scroll_direction must be -1 or 1")
     if config.display.screen_mode not in ("primary", "virtual"):

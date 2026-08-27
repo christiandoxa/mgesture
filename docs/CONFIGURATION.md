@@ -10,4 +10,4 @@ Camera startup applies requested width, height, and FPS, then reports negotiated
 
 Normal startup is `mgesture`; `mgesture run` remains an explicit alias. On first launch, a completed flag is stored in the platform user-data directory and the safe tutorial runs before real input. `mgesture tutorial` replays it without changing settings. `mgesture --reset` removes mgesture user configuration, state, cache, logs, and recordings under the platform directories after confirmation; it keeps installed application files and bundled assets.
 
-The configuration validator rejects invalid thresholds, margins, confidence values, backends, engine/compute selectors, and FPS relationships before runtime.
+The configuration validator rejects invalid thresholds, scroll timing/sensitivity/dead-zone values, margins, confidence values, backends, engine/compute selectors, and FPS relationships before runtime. `gesture.scroll_entry_ms` controls the stable two-finger hold before entry; `gesture.scroll_exit_grace_ms` keeps active scrolling through brief pose or landmark dropouts.

@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "release"))
 from release_targets import publishable_targets  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
-from mgesture.engine.mojo_engine import native_library_name  # noqa: E402
+from mgesture.engine.mojo_engine import MOJO_ABI_VERSION, native_library_name  # noqa: E402
 from mgesture.release import mojo_source_metadata  # noqa: E402
 from mgesture.vision.model_manager import MODEL_SHA256  # noqa: E402
 
@@ -111,7 +111,9 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
         native_mojo_engine_loaded = bool(
             metadata.get("native_mojo_engine_loaded", native_mojo_engine)
         )
-        mojo_abi_version = metadata.get("mojo_abi_version", 1 if native_mojo_engine else None)
+        mojo_abi_version = metadata.get(
+            "mojo_abi_version", MOJO_ABI_VERSION if native_mojo_engine else None
+        )
         mojo_library = metadata.get(
             "mojo_library", native_library_name(target.os) if native_mojo_engine else None
         )

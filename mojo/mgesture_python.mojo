@@ -66,6 +66,7 @@ struct PythonGestureEngine(Movable, Writable):
             Int64(py=config.get("hand_loss_timeout_ms", PythonObject(250))),
             Int64(py=config.get("reacquisition_ms", PythonObject(150))),
             Int64(py=config.get("scroll_entry_ms", PythonObject(180))),
+            Int64(py=config.get("scroll_exit_grace_ms", PythonObject(120))),
             Float64(py=config.get("scroll_sensitivity", PythonObject(35.0))),
             Int32(py=config.get("scroll_direction", PythonObject(1))),
             Float64(py=config.get("scroll_dead_zone", PythonObject(0.001))),

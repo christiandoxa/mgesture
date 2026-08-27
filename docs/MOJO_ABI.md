@@ -1,6 +1,6 @@
 # Native Mojo ABI
 
-The standalone engine is generated from `mojo/mgesture_core.mojo` and exposed through a small C ABI. `MGESTURE_MOJO_ABI_VERSION` is `1`.
+The standalone engine is generated from `mojo/mgesture_core.mojo` and exposed through a small C ABI. `MGESTURE_MOJO_ABI_VERSION` is `2`; version 2 adds the scroll exit-grace configuration field.
 
 Exports:
 

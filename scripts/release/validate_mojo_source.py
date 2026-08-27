@@ -13,7 +13,7 @@ from release_targets import publishable_targets  # noqa: E402
 from validate_mojo_abi import validate as validate_mojo_abi  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src"))
-from mgesture.engine.mojo_engine import native_library_name  # noqa: E402
+from mgesture.engine.mojo_engine import MOJO_ABI_VERSION, native_library_name  # noqa: E402
 from mgesture.release import mojo_source_metadata  # noqa: E402
 
 
@@ -58,7 +58,7 @@ def validate_bundle(root: Path) -> None:
         or metadata.get("python_engine_available") is not True
         or metadata.get("native_mojo_engine_available") is not True
         or metadata.get("native_mojo_engine_loaded") is not True
-        or metadata.get("mojo_abi_version") != 1
+        or metadata.get("mojo_abi_version") != MOJO_ABI_VERSION
         or metadata.get("mojo_library") != native_library_name(str(metadata.get("os", "")))
         or metadata.get("mojo_library_arch") != metadata.get("architecture")
     ):
