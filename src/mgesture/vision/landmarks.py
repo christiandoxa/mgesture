@@ -11,3 +11,9 @@ class DetectedHand:
     frame: LandmarkFrame
     world_landmarks: Sequence[float] | None = None
     tracking_status: str = "tracked"
+
+
+@dataclass(frozen=True, slots=True)
+class LandmarkResult:
+    timestamp_ms: int
+    hand: DetectedHand | None

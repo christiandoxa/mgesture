@@ -137,6 +137,12 @@ class Application:
     def _dispatch(self, batch: Any) -> None:
         self.dispatcher.dispatch(batch)
 
+    def _reset_input(self, reason: str) -> None:
+        try:
+            self._dispatch(self.engine.reset(reason))
+        finally:
+            self.dispatcher.release_all()
+
     def toggle_armed(self) -> None:
         batch = self.engine.set_armed(not getattr(self.engine, "armed", False))
         self._dispatch(batch)
@@ -258,7 +264,20 @@ class Application:
             self._start_hotkey()
             hand_tracked = False
             last_camera_warning = 0.0
+            handled_camera_failure = 0
+            last_result_timestamp = -1
             while not self.stop_event.is_set():
+                if camera.failure_generation > handled_camera_failure:
+                    handled_camera_failure = camera.failure_generation
+                    message = camera.last_error or "camera failure"
+                    LOGGER.error("%s; all held buttons released", message)
+                    camera.frames.clear()
+                    landmarker.discard_pending()
+                    try:
+                        self._reset_input("camera failure")
+                    except Exception:
+                        LOGGER.exception("camera failure cleanup failed")
+                    hand_tracked = False
                 captured = camera.read_latest(0.25)
                 if captured is None:
                     if camera.error and time.monotonic() - last_camera_warning >= 2.0:
@@ -289,10 +308,7 @@ class Application:
                     try:
                         landmarker.close()
                     finally:
-                        try:
-                            self._dispatch(self.engine.reset("GPU inference failure"))
-                        finally:
-                            self.dispatcher.release_all()
+                        self._reset_input("GPU inference failure")
                     self.compute_plan = select_compute_plan(
                         "cpu", self.hardware, getattr(self.engine, "name", "python")
                     )
@@ -306,10 +322,16 @@ class Application:
                     )
                     continue
                 preprocess_ms = (time.perf_counter_ns() - preprocess_start) / 1_000_000
-                detected = landmarker.latest()
+                result = landmarker.poll_latest()
+                if result is None:
+                    continue
+                if result.timestamp_ms <= last_result_timestamp:
+                    continue
+                last_result_timestamp = result.timestamp_ms
+                detected = result.hand
                 if detected is None:
                     frame = LandmarkFrame(
-                        captured.timestamp_ms,
+                        result.timestamp_ms,
                         (0.0,) * 63,
                         "Unknown",
                         0.0,
@@ -327,7 +349,7 @@ class Application:
                 dispatch_start = time.perf_counter_ns()
                 self._dispatch(batch)
                 dispatch_ms = (time.perf_counter_ns() - dispatch_start) / 1_000_000
-                total_ms = time.monotonic_ns() / 1_000_000 - captured.timestamp_ms
+                total_ms = time.monotonic_ns() / 1_000_000 - result.timestamp_ms
                 if cv2 is not None:
                     image = captured.image
                     if self.config.camera.mirror:
@@ -341,7 +363,10 @@ class Application:
                         f"state: {batch.state.value}",
                         f"compute: {self.compute_plan.inference} | gesture: {self.compute_plan.gesture}",
                         f"engine: {getattr(self.engine, 'name', '?')} | backend: {self.backend.name}",
-                        f"camera: {camera.actual_width}x{camera.actual_height} dropped: {camera.frames.dropped}",
+                        f"camera: {camera.actual_width}x{camera.actual_height}@{camera.actual_fps:.1f} "
+                        f"dropped: {camera.frames.dropped} reconnects: {camera.reconnects}",
+                        f"inference queue: {landmarker.diagnostics()['pending_frames']} "
+                        f"dropped: {landmarker.dropped_submissions + landmarker.dropped_results}",
                         f"index pinch: {batch.diagnostics.get('index_pinch', '-')}",
                         f"middle pinch: {batch.diagnostics.get('middle_pinch', '-')}",
                         f"preprocess: {preprocess_ms:.2f}ms inference: {landmarker.last_inference_ms or 0.0:.2f}ms gesture: {gesture_ms:.2f}ms input: {dispatch_ms:.2f}ms total: {total_ms:.2f}ms",

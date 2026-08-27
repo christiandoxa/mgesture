@@ -84,6 +84,7 @@ mgesture doctor --runtime --json
 mgesture list-cameras
 mgesture model install
 mgesture calibrate
+mgesture record-landmarks --developer --output ./recordings/hand.jsonl
 mgesture replay --fixture tests/fixtures/basic.json
 mgesture run --engine auto --compute auto --profile balanced
 mgesture benchmark --engine compare --compute cpu

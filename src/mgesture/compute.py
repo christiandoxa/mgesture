@@ -9,6 +9,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .vision.scheduler import AdaptivePerformanceController  # noqa: F401
+
 
 @dataclass(frozen=True, slots=True)
 class HardwareCapabilities:
@@ -294,24 +296,3 @@ def select_compute_plan(
         False,
         "CPU selected explicitly or GPU candidate unavailable",
     )
-
-
-class AdaptivePerformanceController:
-    def __init__(self, target_fps: int, max_fps: int, idle_fps: int, adaptive: bool = True) -> None:
-        self.target_fps = max(1, target_fps)
-        self.max_fps = max(self.target_fps, max_fps)
-        self.idle_fps = max(1, idle_fps)
-        self.adaptive = adaptive
-        self._next_at = 0.0
-
-    def wait_interval(self, paused: bool, hand_tracked: bool) -> float:
-        if not self.adaptive:
-            return 1.0 / self.max_fps
-        fps = self.idle_fps if paused or not hand_tracked else self.target_fps
-        return 1.0 / max(1, fps)
-
-    def should_process(self, now: float, paused: bool, hand_tracked: bool) -> bool:
-        if now < self._next_at:
-            return False
-        self._next_at = now + self.wait_interval(paused, hand_tracked)
-        return True

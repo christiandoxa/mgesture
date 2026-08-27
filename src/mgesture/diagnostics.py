@@ -17,6 +17,7 @@ from .engine.mojo_engine import NativeMojoGestureEngine, native_library_name
 from .input import create_backend
 from .release import runtime_metadata
 from .self_test import run_self_test
+from .vision.camera import probe_camera
 from .vision.hand_landmarker import HandLandmarker
 from .vision.model_manager import available_model, model_cache_path
 
@@ -37,6 +38,7 @@ class Check:
     detail: str
     remediation: str = ""
     required: bool = True
+    data: dict[str, object] | None = None
 
 
 def _version(module_name: str, distribution: str | None = None) -> str:
@@ -126,19 +128,15 @@ def _engine_capabilities(
     }
 
 
-def _camera_check(index: int) -> Check:
+def _camera_check(index: int, width: int = 640, height: int = 480, target_fps: int = 30) -> Check:
     try:
-        import cv2
-
-        capture = cv2.VideoCapture(index)
-        opened = capture.isOpened()
-        ok, _ = capture.read() if opened else (False, None)
-        capture.release()
+        info = probe_camera(index, width, height, target_fps)
         return Check(
             "camera",
-            bool(opened and ok),
-            f"index={index}, opened={opened}, read={ok}",
-            "Check camera permissions, index, and that another application is not holding it.",
+            bool(info.opened and info.readable),
+            info.detail,
+            "Run `mgesture list-cameras`, check camera permissions, and close other camera users.",
+            data=info.as_dict(),
         )
     except Exception as exc:
         return Check("camera", False, str(exc), "Install OpenCV with `pixi install`.")
@@ -304,7 +302,14 @@ def collect_checks(
         )
     )
     if check_camera:
-        checks.append(_camera_check(config.camera.index))
+        checks.append(
+            _camera_check(
+                config.camera.index,
+                config.camera.width,
+                config.camera.height,
+                config.camera.target_fps,
+            )
+        )
     if check_input:
         backend = None
         input_error: Exception | None = None
@@ -434,6 +439,25 @@ def report_json(config: AppConfig, checks: list[Check], runtime: bool = False) -
         engine_request,
         probe=True,
     )
+    camera_data: dict[str, object] = {
+        "index": config.camera.index,
+        "requested_width": config.camera.width,
+        "requested_height": config.camera.height,
+        "requested_fps": config.camera.target_fps,
+    }
+    camera_check = next((check for check in checks if check.name == "camera"), None)
+    if camera_check is not None and camera_check.data is not None:
+        camera_data = dict(camera_check.data)
+    elif not runtime:
+        try:
+            camera_data = probe_camera(
+                config.camera.index,
+                config.camera.width,
+                config.camera.height,
+                config.camera.target_fps,
+            ).as_dict()
+        except Exception as exc:
+            camera_data["error"] = str(exc)
     result: dict[str, object] = {
         "checks": [
             {"name": check.name, "ok": check.ok, "detail": check.detail, "required": check.required}
@@ -441,6 +465,7 @@ def report_json(config: AppConfig, checks: list[Check], runtime: bool = False) -
         ],
         "hardware": capabilities_dict(hardware),
         "compute": {"mode": request, "plan": plan_data},
+        "camera": camera_data,
         "gesture_engine": {
             "requested": engine_request,
             **engine_status,

@@ -10,6 +10,7 @@ from .application import Application
 from .commands.benchmark import print_benchmark, run_benchmark
 from .commands.calibrate import calibrate
 from .commands.list_cameras import list_cameras
+from .commands.record_landmarks import record_landmarks
 from .commands.replay import run_replay
 from .config import config_path, config_text, load_config, with_overrides, write_config
 from .diagnostics import DoctorCode, collect_checks, print_report
@@ -44,8 +45,24 @@ def _parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--json", action="store_true")
     doctor.add_argument("--runtime", action="store_true")
-    subparsers.add_parser("list-cameras", help="list cameras that open and return a frame")
-    subparsers.add_parser("calibrate", help="safe camera calibration wizard")
+    list_camera = subparsers.add_parser(
+        "list-cameras", help="list cameras that open and return a frame"
+    )
+    list_camera.add_argument("--limit", type=int, default=8)
+    list_camera.add_argument("--width", type=int, default=640)
+    list_camera.add_argument("--height", type=int, default=480)
+    list_camera.add_argument("--fps", type=int, default=30)
+    calibrate_parser = subparsers.add_parser("calibrate", help="safe camera calibration wizard")
+    calibrate_parser.add_argument("--output", type=Path)
+    calibrate_parser.add_argument("--samples", type=int, default=20)
+    record = subparsers.add_parser(
+        "record-landmarks", help="developer-only timestamped local landmark JSONL recording"
+    )
+    record.add_argument("--developer", action="store_true", help="confirm developer-only use")
+    record.add_argument("--output", type=Path, required=True)
+    record.add_argument("--seconds", type=float, default=10.0)
+    record.add_argument("--frames", type=int)
+    record.add_argument("--camera", type=int)
     benchmark = subparsers.add_parser("benchmark", help="benchmark the core gesture engine")
     benchmark.add_argument("--engine", choices=("python", "mojo", "compare"), default="compare")
     benchmark.add_argument("--compute", choices=("cpu", "gpu", "auto"), default="cpu")
@@ -96,7 +113,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"installed {target}")
         return
     if args.command == "list-cameras":
-        raise SystemExit(list_cameras())
+        raise SystemExit(list_cameras(args.limit, args.width, args.height, args.fps))
     if args.command == "doctor":
         try:
             config = load_config()
@@ -114,7 +131,13 @@ def main(argv: list[str] | None = None) -> None:
             print_report(checks)
         raise SystemExit(0 if args.runtime and code == DoctorCode.OPTIONAL_ACCELERATION else code)
     if args.command == "calibrate":
-        raise SystemExit(calibrate(load_config()))
+        raise SystemExit(calibrate(load_config(), args.output, args.samples))
+    if args.command == "record-landmarks":
+        if not args.developer:
+            raise SystemExit("record-landmarks is developer-only; pass --developer explicitly")
+        raise SystemExit(
+            record_landmarks(load_config(), args.output, args.seconds, args.frames, args.camera)
+        )
     if args.command == "replay":
         print(json.dumps(run_replay(args.fixture, args.engine), indent=2))
         return

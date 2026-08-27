@@ -190,6 +190,20 @@ class PythonGestureEngine:
             open_palm,
         )
 
+    def observe(self, landmarks: Sequence[float]) -> dict[str, object]:
+        """Return gesture measurements without changing engine state or emitting actions."""
+        measurements = self._measure(landmarks)
+        return {
+            "index_pinch": measurements.index_pinch,
+            "middle_pinch": measurements.middle_pinch,
+            "palm_x": measurements.palm_x,
+            "palm_y": measurements.palm_y,
+            "index_x": measurements.index_x,
+            "index_y": measurements.index_y,
+            "scroll_pose": measurements.scroll_pose,
+            "open_palm": measurements.open_palm,
+        }
+
     @staticmethod
     def _finger_extended(landmarks: Sequence[float], tip: int, pip: int, mcp: int) -> bool:
         # Image-space y is not used: distance ratio survives mirrored input and small rotations.
