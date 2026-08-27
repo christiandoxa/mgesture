@@ -21,7 +21,7 @@ from .engine import (
     PhysicalHand,
     PythonGestureEngine,
 )
-from .input import FakeMouseBackend, InputDispatcher, Monitor, ScreenLayout
+from .input import FakeMouseBackend, GlobalShortcutListener, InputDispatcher, Monitor, ScreenLayout
 from .vision import Camera, HandLandmarker, available_model, select_camera_index
 from .vision.overlay import draw_overlay
 
@@ -114,6 +114,7 @@ def run_tutorial(
         )
     )
     dispatcher = InputDispatcher(fake)
+    shortcut_listener = GlobalShortcutListener(config.activation_shortcut)
     tutorial_config = replace(
         config,
         gesture=replace(config.gesture, activation_gesture=False),
@@ -138,6 +139,31 @@ def run_tutorial(
     )
     print("Press K to skip, Q or Escape to stop safely.")
     try:
+        shortcut_listener.start()
+    except Exception as exc:
+        print(
+            f"mgesture tutorial: global shortcut {config.activation_shortcut!r} is unavailable: {exc}. "
+            "Space fallback remains available; run `mgesture doctor` or grant keyboard accessibility permission.",
+            flush=True,
+        )
+    else:
+        print(
+            f"Global pause shortcut: {config.activation_shortcut}. "
+            "Space fallback: tutorial preview window only.",
+            flush=True,
+        )
+
+    def toggle_armed() -> None:
+        nonlocal last_success, step
+        dispatcher.dispatch(engine.set_armed(not engine.armed))
+        if step == 6:
+            if not engine.armed:
+                progress["paused"] = True
+            elif progress.get("paused"):
+                last_success = "✓ Pause and resume understood"
+                step = _advance(step, progress)
+
+    try:
         with (
             Camera(
                 camera_index,
@@ -156,7 +182,9 @@ def run_tutorial(
             ) as landmarker,
         ):
             while True:
+                shortcut_listener.process(toggle_armed)
                 captured = camera.read_latest(0.25)
+                shortcut_listener.process(toggle_armed)
                 if captured is None:
                     continue
                 landmarker.submit(captured.image, captured.timestamp_ms)
@@ -278,7 +306,7 @@ def run_tutorial(
                     lines = [
                         "Move pointer: selected hand's index finger | Left click: thumb + index",
                         "Hold/drag: keep left pinch | Right click: thumb + middle",
-                        "Scroll: index + middle up, ring + pinky relaxed | Pause/resume: shortcut or Space",
+                        f"Scroll: index + middle up, ring + pinky relaxed | Pause/resume: {config.activation_shortcut} (global) or Space (preview fallback)",
                         "Q/Escape or Ctrl+C exits safely. Press C to calibrate, or any other key to start.",
                         "K skips the tutorial at any time; all practice input is simulated.",
                     ]
@@ -287,7 +315,7 @@ def run_tutorial(
                     if step == 6:
                         instruction = (
                             f"Press {config.activation_shortcut} to pause, then press it again to resume. "
-                            "Space also works in this preview."
+                            "Space is the preview fallback."
                         )
                     lines = [
                         f"Step {step + 1} of {len(_STEPS)} — {title}",
@@ -458,7 +486,7 @@ def run_tutorial(
                     completed = True
                     break
                 if step == 6 and key == ord(" "):
-                    dispatcher.dispatch(engine.set_armed(not engine.armed))
+                    toggle_armed()
     except KeyboardInterrupt:
         print("Tutorial cancelled safely.", flush=True)
         return 1
@@ -466,6 +494,10 @@ def run_tutorial(
         print(f"mgesture tutorial: {exc}", flush=True)
         return 1
     finally:
+        try:
+            shortcut_listener.stop()
+        except Exception:
+            pass
         try:
             dispatcher.close()
         except Exception:

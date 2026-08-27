@@ -13,6 +13,23 @@ def test_tutorial_skip_uses_fake_input_only(monkeypatch, tmp_path: Path):
     model = tmp_path / "hand.task"
     model.write_bytes(b"model")
     created: list[FakeMouseBackend] = []
+    listeners = []
+
+    class Listener:
+        def __init__(self, shortcut):
+            self.shortcut = shortcut
+            self.started = False
+            self.stopped = False
+            listeners.append(self)
+
+        def start(self):
+            self.started = True
+
+        def process(self, _callback):
+            return 0
+
+        def stop(self):
+            self.stopped = True
 
     class RecordingFake(FakeMouseBackend):
         def __init__(self, *args, **kwargs):
@@ -60,9 +77,13 @@ def test_tutorial_skip_uses_fake_input_only(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(onboarding, "Camera", Camera)
     monkeypatch.setattr(onboarding, "HandLandmarker", Landmarker)
     monkeypatch.setattr(onboarding, "FakeMouseBackend", RecordingFake)
+    monkeypatch.setattr(onboarding, "GlobalShortcutListener", Listener)
     monkeypatch.setattr(onboarding, "draw_overlay", lambda image, *_args: image)
     monkeypatch.setattr(onboarding, "set_onboarding_completed", lambda *_args: None)
 
     assert onboarding.run_tutorial(default_config()) == 0
     assert len(created) == 1
     assert created[0].events == []
+    assert [(listener.shortcut, listener.started, listener.stopped) for listener in listeners] == [
+        ("ctrl+alt+m", True, True)
+    ]

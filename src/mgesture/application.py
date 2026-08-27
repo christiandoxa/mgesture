@@ -12,7 +12,7 @@ from typing import Any
 from .compute import ComputePlan, detect_hardware, select_compute_plan
 from .config import AppConfig, effective_handedness_mirror, effective_preview_mirror
 from .engine import EngineConfig, LandmarkFrame, create_engine
-from .input import InputDispatcher, MouseBackend, create_backend
+from .input import GlobalShortcutListener, InputDispatcher, MouseBackend, create_backend
 from .version import __version__
 from .vision import Camera, HandLandmarker, available_model, select_camera_index
 from .vision.overlay import draw_overlay
@@ -107,8 +107,7 @@ class Application:
         self.performance = AdaptivePerformanceController(
             performance.target_fps, performance.max_fps, performance.idle_fps, performance.adaptive
         )
-        self._toggle_requested = threading.Event()
-        self._hotkey_listener: Any = None
+        self._hotkey_listener: GlobalShortcutListener | None = None
         self._signals_installed = False
         self._signal_handlers: dict[int, Any] = {}
         self._cleaned = False
@@ -151,24 +150,28 @@ class Application:
         self._dispatch(batch)
 
     def _start_hotkey(self) -> None:
+        listener = GlobalShortcutListener(self.config.activation_shortcut)
         try:
-            from pynput import keyboard  # type: ignore[import-untyped]
-
-            shortcut = self.config.activation_shortcut
-            for name in ("ctrl", "alt", "shift", "cmd"):
-                shortcut = shortcut.replace(name, f"<{name}>")
-            self._hotkey_listener = keyboard.GlobalHotKeys({shortcut: self._toggle_requested.set})
-            self._hotkey_listener.start()
+            listener.start()
         except Exception as exc:
-            LOGGER.info("global activation shortcut unavailable: %s", exc)
+            LOGGER.warning(
+                "global activation shortcut unavailable: %s; run `mgesture doctor`", exc
+            )
+            return
+        self._hotkey_listener = listener
+
+    def _process_toggle_requests(self) -> None:
+        if self._hotkey_listener is not None:
+            self._hotkey_listener.process(self.toggle_armed)
 
     def _cleanup(self, camera: Camera | None, landmarker: HandLandmarker | None) -> None:
         if self._cleaned:
             return
         self._cleaned = True
-        if self._hotkey_listener is not None:
+        listener, self._hotkey_listener = self._hotkey_listener, None
+        if listener is not None:
             try:
-                self._hotkey_listener.stop()
+                listener.stop()
             except Exception:
                 LOGGER.exception("global shortcut close failed")
         try:
@@ -283,6 +286,7 @@ class Application:
             handled_camera_failure = 0
             last_result_timestamp = -1
             while not self.stop_event.is_set():
+                self._process_toggle_requests()
                 if camera.failure_generation > handled_camera_failure:
                     handled_camera_failure = camera.failure_generation
                     message = camera.last_error or "camera failure"
@@ -295,15 +299,13 @@ class Application:
                         LOGGER.exception("camera failure cleanup failed")
                     hand_tracked = False
                 captured = camera.read_latest(0.25)
+                self._process_toggle_requests()
                 if captured is None:
                     if camera.error and time.monotonic() - last_camera_warning >= 2.0:
                         LOGGER.warning("%s", camera.error)
                         last_camera_warning = time.monotonic()
                     continue
                 now = time.monotonic()
-                if self._toggle_requested.is_set():
-                    self._toggle_requested.clear()
-                    self.toggle_armed()
                 if not self.performance.should_process(
                     now, not getattr(self.engine, "armed", False), hand_tracked
                 ):

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from mgesture.application import Application
-from mgesture.engine import Action, ActionBatch, Button
+from mgesture.engine import Action, ActionBatch, Button, EngineConfig, PythonGestureEngine
 from mgesture.input import FakeMouseBackend, InputDispatcher, Monitor, ScreenLayout
 from mgesture.input.linux_wayland_backend import LinuxWaylandBackend
 from mgesture.input.macos_backend import MacOSMouseBackend, active_display_ids
@@ -83,6 +83,36 @@ def test_dispatcher_close_closes_backend_after_release_failure():
 
     assert backend.closed
     assert dispatcher.held == set()
+
+
+def test_application_processes_two_queued_toggles_without_a_frame():
+    class QueuedListener:
+        def process(self, callback):
+            callback()
+            callback()
+            return 2
+
+    backend = FakeMouseBackend()
+    dispatcher = InputDispatcher(backend)
+    engine = PythonGestureEngine(
+        EngineConfig(reacquisition_ms=0, activation_gesture=False),
+        armed=True,
+    )
+    engine._held = Button.LEFT
+    dispatcher.held.add(Button.LEFT)
+    backend.held.add(Button.LEFT)
+    app = object.__new__(Application)
+    app._hotkey_listener = QueuedListener()
+    app.engine = engine
+    app.dispatcher = dispatcher
+
+    app._process_toggle_requests()
+
+    assert engine.armed is True
+    assert engine.state.value == "ARMED"
+    assert engine._reacquire_since is None
+    assert backend.held == set()
+    assert [event.kind for event in backend.events] == ["button_up"]
 
 
 def test_application_cleanup_releases_input_when_engine_reset_fails():

@@ -7,12 +7,70 @@ from typing import Any
 from .engine import Button, EngineConfig, create_engine
 from .engine.mojo_engine import NativeMojoGestureEngine
 from .engine.synthetic import synthetic_frames
-from .input import FakeMouseBackend
+from .input import FakeMouseBackend, GlobalShortcutListener, create_backend
 from .release import runtime_metadata
 from .vision.model_manager import available_model
 
+_PLATFORM_INPUT_MODULES = (
+    "mgesture.input.hotkey",
+    "mgesture.input.pynput_backend",
+    "mgesture.input.linux_x11_backend",
+    "mgesture.input.linux_wayland_backend",
+    "mgesture.input.macos_backend",
+    "mgesture.input.windows_backend",
+)
 
-def run_self_test(require_mojo: bool = False, engine_request: str = "auto") -> dict[str, Any]:
+
+def platform_input_checks() -> dict[str, str]:
+    """Probe packaged input code without emitting pointer events."""
+    checks: dict[str, str] = {}
+    module_errors: list[str] = []
+    for module_name in _PLATFORM_INPUT_MODULES:
+        try:
+            importlib.import_module(module_name)
+        except Exception as exc:
+            module_errors.append(f"{module_name}: {exc}")
+    checks["input_modules"] = (
+        "passed" if not module_errors else "failed: " + "; ".join(module_errors)
+    )
+
+    listener: GlobalShortcutListener | None = None
+    try:
+        listener = GlobalShortcutListener("ctrl+alt+m")
+        listener.start()
+        checks["keyboard_listener"] = "passed"
+    except Exception as exc:
+        checks["keyboard_listener"] = f"failed: {exc}"
+    finally:
+        if listener is not None:
+            try:
+                listener.stop()
+            except Exception as exc:
+                checks["keyboard_listener"] = f"failed: {exc}"
+
+    backend: Any = None
+    try:
+        backend = create_backend()
+        layout = backend.get_screen_layout()
+        if not layout.monitors:
+            raise RuntimeError("input backend reported no monitors")
+        checks["mouse_backend"] = "passed"
+    except Exception as exc:
+        checks["mouse_backend"] = f"failed: {exc}"
+    finally:
+        if backend is not None:
+            try:
+                backend.close()
+            except Exception as exc:
+                checks["mouse_backend"] = f"failed: {exc}"
+    return checks
+
+
+def run_self_test(
+    require_mojo: bool = False,
+    engine_request: str = "auto",
+    check_platform_input: bool = False,
+) -> dict[str, Any]:
     checks: dict[str, str] = {}
     metadata = runtime_metadata()
     checks["mojo_source"] = (
@@ -40,6 +98,8 @@ def run_self_test(require_mojo: bool = False, engine_request: str = "auto") -> d
             checks[module] = "passed"
         except Exception as exc:
             checks[module] = f"failed: {exc}"
+    if check_platform_input:
+        checks.update(platform_input_checks())
     model = available_model()
     checks["model"] = "passed" if model is not None else "not-bundled-source"
     backend = FakeMouseBackend()

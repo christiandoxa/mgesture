@@ -119,3 +119,20 @@ def test_first_run_runs_tutorial_before_application(monkeypatch: pytest.MonkeyPa
 
     assert cli._run_application(_parser().parse_args(["run"])) == 0
     assert calls == ["tutorial", "application", "run"]
+
+
+def test_self_test_platform_input_flag_is_forwarded(monkeypatch: pytest.MonkeyPatch):
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "run_self_test",
+        lambda **kwargs: calls.append(kwargs) or {"passed": True},
+    )
+
+    with pytest.raises(SystemExit) as result:
+        cli.main(["self-test", "--platform-input"])
+
+    assert result.value.code == 0
+    assert calls == [
+        {"require_mojo": False, "engine_request": "auto", "check_platform_input": True}
+    ]

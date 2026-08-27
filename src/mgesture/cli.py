@@ -148,6 +148,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     self_test.add_argument("--headless", action="store_true")
     self_test.add_argument("--fake-input", action="store_true")
+    self_test.add_argument(
+        "--platform-input",
+        action="store_true",
+        help="probe packaged keyboard and mouse backends without moving the cursor",
+    )
     self_test.add_argument("--engine", choices=("auto", "mojo", "python"))
     update = subparsers.add_parser("update", help="check for or install a newer release")
     update.add_argument("--check", action="store_true")
@@ -304,7 +309,11 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.command == "self-test":
         engine_request = args.engine or args.global_engine or "auto"
-        result = run_self_test(require_mojo=engine_request == "mojo", engine_request=engine_request)
+        result = run_self_test(
+            require_mojo=engine_request == "mojo",
+            engine_request=engine_request,
+            check_platform_input=args.platform_input,
+        )
         print(json.dumps(result, indent=2))
         raise SystemExit(0 if result["passed"] else 1)
     if args.command == "update":
