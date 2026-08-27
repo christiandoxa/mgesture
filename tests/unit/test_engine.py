@@ -331,7 +331,7 @@ def test_scroll_active_hysteresis_tolerates_thumb_drift_without_clicking():
 
     assert entered.state is GestureState.SCROLL
     assert drifted.state is GestureState.SCROLL
-    assert drifted.diagnostics["scroll_pinch_clear"] is False
+    assert drifted.diagnostics["scroll_pinch_clear"] is True
     assert drifted.diagnostics["scroll_active_pinch_clear"] is True
     assert not [action for action in drifted.actions if action.button]
 

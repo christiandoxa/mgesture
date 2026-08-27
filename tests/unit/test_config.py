@@ -8,6 +8,8 @@ from mgesture.config import (
     AppConfig,
     GestureConfig,
     config_text,
+    effective_handedness_mirror,
+    effective_preview_mirror,
     load_config,
     validate,
     with_overrides,
@@ -22,7 +24,7 @@ def test_config_round_trip(tmp_path: Path):
     loaded = load_config(path)
     assert loaded.camera.mirror is True
     assert loaded.compute.mode == "auto"
-    assert loaded.vision.hand_selection is HandSelection.RIGHT
+    assert loaded.vision.hand_selection is HandSelection.AUTO
     assert loaded.gesture.scroll_exit_grace_ms == 120
     assert "[performance]" in config_text(loaded)
     assert "scroll_exit_grace_ms = 120" in config_text(loaded)
@@ -39,6 +41,39 @@ def test_hand_selection_config_round_trip_and_override(tmp_path: Path):
         with_overrides(loaded, hand_selection="either").vision.hand_selection
         is HandSelection.EITHER
     )
+
+
+def test_legacy_config_keeps_right_hand_and_mirror_behavior(tmp_path: Path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[camera]\nmirror = true\n[vision]\nhandedness_mirrored_input = true\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_config(path)
+
+    assert loaded.vision.hand_selection is HandSelection.RIGHT
+    assert effective_handedness_mirror(loaded.vision) is True
+    assert effective_preview_mirror(loaded.camera) is True
+
+
+def test_transform_policies_round_trip_independently(tmp_path: Path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[camera]\npreview_mirror = "off"\n'
+        '[vision]\nhandedness_mirror = "on"\nhand_selection = "either"\n'
+        "[gesture]\npointer_mirror = false\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_config(path)
+
+    assert loaded.camera.preview_mirror == "off"
+    assert loaded.vision.handedness_mirror == "on"
+    assert loaded.vision.hand_selection is HandSelection.EITHER
+    assert loaded.gesture.pointer_mirror is False
+    assert effective_preview_mirror(loaded.camera) is False
+    assert effective_handedness_mirror(loaded.vision) is True
 
 
 def test_onboarding_state_round_trip(tmp_path: Path, monkeypatch):

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .compute import ComputePlan, detect_hardware, select_compute_plan
-from .config import AppConfig
+from .config import AppConfig, effective_handedness_mirror, effective_preview_mirror
 from .engine import EngineConfig, LandmarkFrame, create_engine
 from .input import InputDispatcher, MouseBackend, create_backend
 from .version import __version__
@@ -35,7 +35,7 @@ def engine_config(config: AppConfig, backend: MouseBackend) -> EngineConfig:
         screen_y=y,
         screen_width=width,
         screen_height=height,
-        mirror=config.camera.mirror,
+        mirror=config.gesture.pointer_mirror,
         handedness_confidence=config.vision.handedness_confidence,
         hand_selection=config.vision.hand_selection,
         **{
@@ -229,7 +229,7 @@ class Application:
                     self.config.vision.presence_confidence,
                     self.config.vision.tracking_confidence,
                     "gpu" if self.compute_plan.inference == "mediapipe_gpu" else "cpu",
-                    self.config.vision.handedness_mirrored_input,
+                    effective_handedness_mirror(self.config.vision),
                     self.config.vision.hand_selection,
                 )
             except Exception as exc:
@@ -247,7 +247,7 @@ class Application:
                     self.config.vision.presence_confidence,
                     self.config.vision.tracking_confidence,
                     "cpu",
-                    self.config.vision.handedness_mirrored_input,
+                    effective_handedness_mirror(self.config.vision),
                     self.config.vision.hand_selection,
                 )
             cv2 = None
@@ -334,7 +334,7 @@ class Application:
                         self.config.vision.presence_confidence,
                         self.config.vision.tracking_confidence,
                         "cpu",
-                        self.config.vision.handedness_mirrored_input,
+                        effective_handedness_mirror(self.config.vision),
                         self.config.vision.hand_selection,
                     )
                     continue
@@ -372,7 +372,7 @@ class Application:
                 if cv2 is not None:
                     image = captured.image
                     # Preview/control mirroring is independent from MediaPipe input mirroring.
-                    if self.config.camera.mirror:
+                    if effective_preview_mirror(self.config.camera):
                         image = cv2.flip(image, 1)
                         if display_landmarks is not None:
                             display_landmarks = tuple(

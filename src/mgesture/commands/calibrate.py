@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
-from mgesture.config import AppConfig, write_config
+from mgesture.config import AppConfig, effective_handedness_mirror, write_config
 from mgesture.engine import EngineConfig, PythonGestureEngine
 from mgesture.vision import Camera, HandLandmarker, available_model
 
@@ -84,7 +84,7 @@ def calibrate(
                 config.vision.presence_confidence,
                 config.vision.tracking_confidence,
                 "cpu",
-                config.vision.handedness_mirrored_input,
+                effective_handedness_mirror(config.vision),
                 config.vision.hand_selection,
             ) as landmarker,
         ):

@@ -43,7 +43,7 @@ def test_run_hand_selection_reaches_application(monkeypatch: pytest.MonkeyPatch)
 
     class Application:
         def __init__(self, config, *args):
-            captured.append(config.vision.hand_selection)
+            captured.append((config.vision.hand_selection, config.vision.handedness_mirror))
 
         def run(self):
             return 0
@@ -51,8 +51,16 @@ def test_run_hand_selection_reaches_application(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(cli, "Application", Application)
     monkeypatch.setattr(cli, "onboarding_completed", lambda: True)
 
-    assert cli._run_application(_parser().parse_args(["run", "--hand", "left"])) == 0
-    assert str(captured[0]) == "left"
+    assert (
+        cli._run_application(_parser().parse_args(["run", "--hand", "left", "--mirror", "on"])) == 0
+    )
+    assert str(captured[0][0]) == "left"
+    assert captured[0][1] == "on"
+
+
+def test_invalid_hand_selection_is_rejected() -> None:
+    with pytest.raises(SystemExit):
+        _parser().parse_args(["run", "--hand", "banana"])
 
 
 def test_reset_requires_confirmation_for_noninteractive_input(monkeypatch: pytest.MonkeyPatch):

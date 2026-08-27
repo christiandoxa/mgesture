@@ -31,7 +31,9 @@ class CameraConfig:
     width: int = 640
     height: int = 480
     target_fps: int = 30
+    # Legacy compatibility field; preview_mirror is the canonical setting.
     mirror: bool = True
+    preview_mirror: str = "auto"
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,8 +43,10 @@ class VisionConfig:
     presence_confidence: float = 0.65
     tracking_confidence: float = 0.65
     model_path: str | None = None
+    # Legacy compatibility field; handedness_mirror is canonical.
     handedness_mirrored_input: bool = False
-    hand_selection: HandSelection = HandSelection.RIGHT
+    handedness_mirror: str = "auto"
+    hand_selection: HandSelection = HandSelection.AUTO
 
     def __post_init__(self) -> None:
         try:
@@ -68,6 +72,7 @@ class GestureConfig:
     active_bottom: float = 0.10
     pointer_gain: float = 1.0
     pointer_acceleration: float = 0.0
+    pointer_mirror: bool = True
     dead_zone: float = 0.002
     filter_min_cutoff: float = 1.0
     filter_beta: float = 0.007
@@ -146,6 +151,18 @@ def log_dir() -> Path:
     return candidate if candidate.name.casefold() == "mgesture" else candidate.parent
 
 
+def effective_preview_mirror(camera: CameraConfig) -> bool:
+    return camera.mirror if camera.preview_mirror == "auto" else camera.preview_mirror == "on"
+
+
+def effective_handedness_mirror(vision: VisionConfig) -> bool:
+    if vision.handedness_mirror == "on":
+        return True
+    if vision.handedness_mirror == "off":
+        return False
+    return vision.handedness_mirrored_input
+
+
 def onboarding_completed() -> bool:
     try:
         raw = json.loads(state_path().read_text(encoding="utf-8"))
@@ -212,8 +229,7 @@ def _resolved(path: Path) -> Path:
 
 def _looks_like_bundle_root(path: Path) -> bool:
     return (
-        (path / "bin" / "mgesture").is_file()
-        or (path / "bin" / "mgesture.exe").is_file()
+        (path / "bin" / "mgesture").is_file() or (path / "bin" / "mgesture.exe").is_file()
     ) and (path / "share" / "mgesture" / "release-metadata.json").is_file()
 
 
@@ -310,7 +326,7 @@ def reset_targets() -> tuple[ResetTarget, ...]:
     data = _absolute(data_dir())
     legacy_root = _legacy_install_root(data)
     if legacy_root is None:
-        data_targets = (
+        data_targets: tuple[ResetTarget, ...] = (
             ResetTarget("user data, calibration, tutorial state, and recordings", data),
         )
     else:
@@ -377,10 +393,14 @@ def load_config(path: Path | None = None) -> AppConfig:
         return default_config()
     with target.open("rb") as handle:
         raw = tomllib.load(handle)
+    vision_values = dict(raw.get("vision") or {})
+    if "hand_selection" not in vision_values:
+        # Existing files predate hand selection and must retain right-hand behavior.
+        vision_values["hand_selection"] = HandSelection.RIGHT
     return validate(
         AppConfig(
             camera=_section(CameraConfig, raw.get("camera")),
-            vision=_section(VisionConfig, raw.get("vision")),
+            vision=_section(VisionConfig, vision_values),
             display=_section(DisplayConfig, raw.get("display")),
             gesture=_section(GestureConfig, raw.get("gesture")),
             input=_section(InputConfig, raw.get("input")),
@@ -416,6 +436,10 @@ def validate(config: AppConfig) -> AppConfig:
         HandSelection.coerce(config.vision.hand_selection)
     except ValueError:
         errors.append("vision.hand_selection must be right, left, either, or auto")
+    if config.camera.preview_mirror not in ("auto", "on", "off"):
+        errors.append("camera.preview_mirror must be auto, on, or off")
+    if config.vision.handedness_mirror not in ("auto", "on", "off"):
+        errors.append("vision.handedness_mirror must be auto, on, or off")
     margins = (
         config.gesture.active_left,
         config.gesture.active_right,
@@ -483,6 +507,8 @@ def with_overrides(config: AppConfig, **values: Any) -> AppConfig:
             result = replace(result, performance=replace(result.performance, **{name: value}))
         elif name in {field.name for field in fields(DisplayConfig)}:
             result = replace(result, display=replace(result.display, **{name: value}))
+        elif name in {field.name for field in fields(GestureConfig)}:
+            result = replace(result, gesture=replace(result.gesture, **{name: value}))
         elif name in {field.name for field in fields(CameraConfig)}:
             result = replace(result, camera=replace(result.camera, **{name: value}))
     return validate(result)

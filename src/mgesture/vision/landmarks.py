@@ -26,3 +26,4 @@ class LandmarkResult:
     timestamp_ms: int
     hand: DetectedHand | None
     hand_changed: bool = False
+    hands: tuple[DetectedHand, ...] = ()

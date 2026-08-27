@@ -87,7 +87,7 @@ def release_base_url(release: str = "latest") -> str:
         return f"https://github.com/{REPOSITORY}/releases/latest/download"
     if not _VERSION_RE.fullmatch(release):
         raise ValueError("release must be latest or semantic version x.y.z")
-    return f"https://github.com/{REPOSITORY}/releases/download/{release}"
+    return f"https://github.com/{REPOSITORY}/releases/download/v{release}"
 
 
 def _read_url(base: str, filename: str) -> bytes:
@@ -105,12 +105,32 @@ def resolve_release(release: str = "latest", target: str | None = None) -> dict[
     if not isinstance(manifest_value, dict):
         raise RuntimeError("release-manifest.json must contain an object")
     manifest = cast(dict[str, Any], manifest_value)
-    row = manifest.get("targets", {}).get(target)
+    if manifest.get("schema_version") != 1:
+        raise RuntimeError("unsupported release manifest schema")
+    version = manifest.get("version")
+    if not isinstance(version, str) or not _VERSION_RE.fullmatch(version):
+        raise RuntimeError("release manifest does not contain a stable semantic version")
+    targets = manifest.get("targets")
+    if not isinstance(targets, dict):
+        raise RuntimeError("release manifest has no target matrix")
+    row = targets.get(target)
     if not isinstance(row, dict):
         raise RuntimeError(f"release has no standalone asset for target {target}")
     asset = str(row.get("asset", ""))
-    if not asset or not asset.startswith("mgesture-"):
+    expected_suffix = ".zip" if target.endswith("-windows-msvc") else ".tar.gz"
+    expected_asset = f"mgesture-{target}{expected_suffix}"
+    if asset != expected_asset:
         raise RuntimeError(f"release manifest has invalid asset for target {target}")
+    if (
+        row.get("target") != target
+        or row.get("standalone") is not True
+        or row.get("native_mojo_engine") is not True
+        or row.get("python_engine_available") is not True
+    ):
+        raise RuntimeError(f"release manifest target metadata is invalid for {target}")
+    digest = row.get("sha256")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+        raise RuntimeError(f"release manifest has no valid checksum for {target}")
     return {
         "manifest": manifest,
         "target": target,
@@ -175,10 +195,13 @@ def runtime_metadata() -> dict[str, Any]:
 def check_for_update() -> dict[str, Any]:
     resolved = resolve_release()
     latest = str(resolved["manifest"].get("version", ""))
+    latest_key = _version_key(latest)
+    current_key = _version_key(__version__)
     return {
         "current": __version__,
         "latest": latest,
-        "update_available": _version_key(latest) > _version_key(__version__),
+        "update_available": latest_key > current_key,
+        "newer_installed": latest_key < current_key,
         "target": resolved["target"],
         "asset": resolved["asset"].asset,
     }
@@ -193,9 +216,18 @@ def _version_key(value: str) -> tuple[int, int, int, str]:
 
 def run_update(check_only: bool = False) -> int:
     status = check_for_update()
-    print(json.dumps(status, indent=2))
-    if check_only or not status["update_available"]:
+    print(f"Current version: {status['current']}")
+    print(f"Latest version : {status['latest']}")
+    if status["newer_installed"]:
+        print("Installed version is newer than the latest stable release.")
         return 0
+    if not status["update_available"]:
+        print("mgesture is already up to date.")
+        return 0
+    if check_only:
+        print("Update available.")
+        return 0
+    print(f"Downloading mgesture {status['latest']}...")
     installer = _installer_path()
     if installer is None:
         raise RuntimeError(
@@ -215,7 +247,12 @@ def run_update(check_only: bool = False) -> int:
         ]
     else:
         command = ["sh", str(installer)]
-    return subprocess.run(command, env=environment, check=False).returncode
+    result = subprocess.run(command, env=environment, check=False)
+    if result.returncode:
+        print("Update failed. The current installation remains unchanged.", file=sys.stderr)
+        return result.returncode
+    print(f"Updated mgesture to {status['latest']}.")
+    return 0
 
 
 def _installer_path() -> Path | None:

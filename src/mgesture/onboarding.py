@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from .application import engine_config
-from .config import AppConfig, set_onboarding_completed
-from .engine import ActionBatch, Button, LandmarkFrame, PythonGestureEngine
+from .config import (
+    AppConfig,
+    effective_handedness_mirror,
+    effective_preview_mirror,
+    set_onboarding_completed,
+    write_config,
+)
+from .engine import (
+    ActionBatch,
+    Button,
+    HandSelection,
+    LandmarkFrame,
+    PhysicalHand,
+    PythonGestureEngine,
+)
 from .input import FakeMouseBackend, InputDispatcher, Monitor, ScreenLayout
 from .vision import Camera, HandLandmarker, available_model, select_camera_index
 from .vision.overlay import draw_overlay
@@ -33,8 +47,34 @@ def _advance(step: int, progress: dict[str, Any]) -> int:
     return step + 1
 
 
-def run_tutorial(config: AppConfig) -> int:
+def _choose_hand(config: AppConfig, enabled: bool) -> AppConfig:
+    if not enabled or not sys.stdin.isatty():
+        return config
+    current = config.vision.hand_selection
+    print("Which hand would you like to use? [A]uto [R]ight [L]eft [E]ither")
+    try:
+        answer = input(f"Choice (Enter keeps {current.value}): ").strip().casefold()
+    except EOFError:
+        return config
+    choices = {
+        "a": HandSelection.AUTO,
+        "r": HandSelection.RIGHT,
+        "l": HandSelection.LEFT,
+        "e": HandSelection.EITHER,
+    }
+    selected = choices.get(answer, current if not answer else None)
+    if selected is None:
+        print("Unknown choice; keeping the current hand preference.")
+        return config
+    updated = replace(config, vision=replace(config.vision, hand_selection=selected))
+    if updated != config:
+        write_config(updated)
+    return updated
+
+
+def run_tutorial(config: AppConfig, *, choose_hand: bool = True) -> int:
     """Run one safe tutorial using the production engine and a fake mouse."""
+    config = _choose_hand(config, choose_hand)
     try:
         import cv2
     except ImportError as exc:
@@ -86,6 +126,10 @@ def run_tutorial(config: AppConfig) -> int:
     last_success = ""
     selected_hand = config.vision.hand_selection.value
     selected_hand_label = selected_hand if selected_hand in ("left", "right") else "selected"
+    inference_mirror = effective_handedness_mirror(config.vision)
+    mirror_confirmed = config.vision.handedness_mirror != "auto"
+    mirror_stable_frames = 0
+    mirror_candidate: Any = None
 
     print(
         "Welcome to mgesture. This short tutorial uses simulated input only; it cannot move or click your real mouse."
@@ -105,7 +149,7 @@ def run_tutorial(config: AppConfig) -> int:
                 config.vision.presence_confidence,
                 config.vision.tracking_confidence,
                 "cpu",
-                config.vision.handedness_mirrored_input,
+                inference_mirror,
                 config.vision.hand_selection,
             ) as landmarker,
         ):
@@ -116,9 +160,35 @@ def run_tutorial(config: AppConfig) -> int:
                 landmarker.submit(captured.image, captured.timestamp_ms)
                 result = landmarker.poll_latest()
                 display_landmarks: tuple[float, ...] | None = None
+                mirror_candidate = None
                 if result is not None and result.timestamp_ms > last_result:
                     last_result = result.timestamp_ms
-                    if result.hand is None:
+                    if not mirror_confirmed:
+                        candidates = [
+                            hand
+                            for hand in getattr(result, "hands", ())
+                            if hand.frame.physical_hand is not PhysicalHand.UNKNOWN
+                        ]
+                        mirror_candidate = max(
+                            candidates or ([result.hand] if result.hand is not None else []),
+                            key=lambda hand: hand.frame.handedness_confidence,
+                            default=None,
+                        )
+                        if mirror_candidate is None:
+                            mirror_stable_frames = 0
+                        else:
+                            mirror_stable_frames += 1
+                        frame = LandmarkFrame(
+                            result.timestamp_ms,
+                            (0.0,) * 63,
+                            "Unknown",
+                            0.0,
+                            captured.width,
+                            captured.height,
+                        )
+                        if mirror_candidate is not None:
+                            display_landmarks = tuple(mirror_candidate.frame.landmarks)
+                    elif result.hand is None:
                         frame = LandmarkFrame(
                             result.timestamp_ms,
                             (0.0,) * 63,
@@ -139,7 +209,7 @@ def run_tutorial(config: AppConfig) -> int:
                     dispatcher.dispatch(batch)
                     events = fake.events[start:]
 
-                    if step == 0:
+                    if step == 0 and mirror_confirmed:
                         if batch.diagnostics.get("valid_hand") is True:
                             progress["right_frames"] = progress.get("right_frames", 0) + 1
                         else:
@@ -224,7 +294,32 @@ def run_tutorial(config: AppConfig) -> int:
                     ]
                     if last_success:
                         lines.insert(2, last_success)
-                    if step == 0 and batch.diagnostics.get("valid_hand") is not True:
+                    if step == 0 and not mirror_confirmed:
+                        if mirror_candidate is None:
+                            lines.append(
+                                "Hold your selected hand steady for camera orientation calibration."
+                            )
+                        else:
+                            detected = mirror_candidate.frame.physical_hand.value.upper()
+                            lines.append(f"Physical hand seen: {detected}")
+                            if config.vision.hand_selection not in (
+                                HandSelection.AUTO,
+                                HandSelection.EITHER,
+                            ) and not config.vision.hand_selection.accepts(
+                                mirror_candidate.frame.physical_hand
+                            ):
+                                lines.append(
+                                    f"Expected {selected_hand_label.upper()}; press N to try the other camera interpretation."
+                                )
+                            elif mirror_stable_frames >= 5:
+                                lines.append(
+                                    "Press Y if this is correct, or N to try the other interpretation."
+                                )
+                            else:
+                                lines.append(
+                                    f"Checking orientation: {mirror_stable_frames}/5 stable frames"
+                                )
+                    elif step == 0 and batch.diagnostics.get("valid_hand") is not True:
                         lines.append(f"Waiting for your {selected_hand_label} hand...")
                     elif step == 0:
                         lines.append(f"{selected_hand_label.title()} hand detected")
@@ -253,8 +348,17 @@ def run_tutorial(config: AppConfig) -> int:
                             ]
                         )
 
+                image = captured.image
+                flip = getattr(cv2, "flip", None)
+                if effective_preview_mirror(config.camera) and callable(flip):
+                    image = flip(image, 1)
+                    if display_landmarks is not None:
+                        display_landmarks = tuple(
+                            1.0 - value if index % 3 == 0 else value
+                            for index, value in enumerate(display_landmarks)
+                        )
                 overlay = draw_overlay(
-                    captured.image,
+                    image,
                     display_landmarks,
                     batch,
                     lines,
@@ -310,6 +414,40 @@ def run_tutorial(config: AppConfig) -> int:
                 if key == ord("k"):
                     completed = True
                     break
+                if step == 0 and not mirror_confirmed:
+                    if (
+                        key in (ord("y"), 13)
+                        and mirror_candidate is not None
+                        and mirror_stable_frames >= 5
+                        and (
+                            config.vision.hand_selection
+                            in (HandSelection.AUTO, HandSelection.EITHER)
+                            or config.vision.hand_selection.accepts(
+                                mirror_candidate.frame.physical_hand
+                            )
+                        )
+                    ):
+                        mirror_confirmed = True
+                        config = replace(
+                            config,
+                            vision=replace(
+                                config.vision,
+                                handedness_mirror="on" if inference_mirror else "off",
+                            ),
+                        )
+                        write_config(config)
+                        last_success = f"✓ Physical {mirror_candidate.frame.physical_hand.value.lower()} hand confirmed"
+                        step = _advance(step, progress)
+                    elif (
+                        key == ord("n")
+                        and mirror_candidate is not None
+                        and mirror_stable_frames >= 5
+                    ):
+                        inference_mirror = not inference_mirror
+                        landmarker.set_handedness_mirrored_input(inference_mirror)
+                        mirror_stable_frames = 0
+                        last_success = "Trying the alternate camera interpretation..."
+                    continue
                 if step >= len(_STEPS) and key == ord("c"):
                     calibrate_after = True
                     completed = True

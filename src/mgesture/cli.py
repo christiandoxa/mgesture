@@ -54,6 +54,12 @@ def _parser() -> argparse.ArgumentParser:
         choices=tuple(selection.value for selection in HandSelection),
         help="select the physical hand used for control",
     )
+    parser.add_argument(
+        "--mirror",
+        dest="global_mirror",
+        choices=("auto", "on", "off"),
+        help="set the camera handedness interpretation for this run",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     run = subparsers.add_parser("run", help="start webcam gesture control; starts paused")
@@ -65,6 +71,11 @@ def _parser() -> argparse.ArgumentParser:
         dest="hand_selection",
         choices=tuple(selection.value for selection in HandSelection),
         help="select the physical hand used for control",
+    )
+    run.add_argument(
+        "--mirror",
+        choices=("auto", "on", "off"),
+        help="set the camera handedness interpretation for this run",
     )
     run.add_argument("--compute", choices=("auto", "gpu", "cpu"))
     run.add_argument("--profile", choices=("performance", "balanced", "efficiency"))
@@ -90,7 +101,19 @@ def _parser() -> argparse.ArgumentParser:
     calibrate_parser = subparsers.add_parser("calibrate", help="safe camera calibration wizard")
     calibrate_parser.add_argument("--output", type=Path)
     calibrate_parser.add_argument("--samples", type=int, default=20)
-    subparsers.add_parser("tutorial", help="replay the safe interactive gesture tutorial")
+    tutorial = subparsers.add_parser(
+        "tutorial", help="replay the safe interactive gesture tutorial"
+    )
+    tutorial.add_argument(
+        "--hand",
+        choices=tuple(selection.value for selection in HandSelection),
+        help="override the physical hand used by this tutorial",
+    )
+    tutorial.add_argument(
+        "--mirror",
+        choices=("auto", "on", "off"),
+        help="override the camera handedness interpretation for this tutorial",
+    )
     record = subparsers.add_parser(
         "record-landmarks", help="developer-only timestamped local landmark JSONL recording"
     )
@@ -141,7 +164,9 @@ def _reset_command(yes: bool, dry_run: bool = False) -> int:
             return 1
         print("Reset preview")
         print("\nWill remove:")
-        existing = [target for target in targets if target.path.exists() or target.path.is_symlink()]
+        existing = [
+            target for target in targets if target.path.exists() or target.path.is_symlink()
+        ]
         if existing:
             for target in existing:
                 print(f"  {target.label}")
@@ -197,6 +222,7 @@ def _run_application(args: argparse.Namespace) -> int:
             monitor=args.monitor,
             hand_selection=getattr(args, "hand_selection", None)
             or getattr(args, "global_hand_selection", None),
+            handedness_mirror=getattr(args, "mirror", None) or getattr(args, "global_mirror", None),
         )
         configure_logging(config.log_level)
         if not onboarding_completed():
@@ -259,7 +285,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "calibrate":
         raise SystemExit(calibrate(load_config(), args.output, args.samples))
     if args.command == "tutorial":
-        raise SystemExit(run_tutorial(load_config()))
+        tutorial_config = with_overrides(
+            load_config(), hand_selection=args.hand, handedness_mirror=args.mirror
+        )
+        raise SystemExit(run_tutorial(tutorial_config, choose_hand=False))
     if args.command == "record-landmarks":
         if not args.developer:
             raise SystemExit("record-landmarks is developer-only; pass --developer explicitly")

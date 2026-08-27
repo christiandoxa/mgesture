@@ -53,7 +53,7 @@ case "$(uname -s):$(uname -m)" in
   *) fail "unsupported target: $(uname -s)-$(uname -m)";;
 esac
 if [ -z "$base" ]; then
-  if [ "$release" = latest ]; then base="https://github.com/$repo/releases/latest/download"; else base="https://github.com/$repo/releases/download/$release"; fi
+  if [ "$release" = latest ]; then base="https://github.com/$repo/releases/latest/download"; else base="https://github.com/$repo/releases/download/v$release"; fi
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/mgesture-install.XXXXXX")
@@ -66,6 +66,7 @@ asset=$(awk -F '\t' -v target="$target" '$1 == target {print $2; exit}' "$tmp/re
 [ -n "$asset" ] || fail "release manifest has no matching target $target"
 case "$asset" in "mgesture-$target.tar.gz") ;; *) fail 'release manifest asset mismatch';; esac
 manifest_version=$(awk -F '\t' '$1 == "# version" {print $2; exit}' "$tmp/release-manifest.tsv")
+if [ "$release" != latest ] && [ "$manifest_version" != "$release" ]; then fail 'requested release differs from manifest version'; fi
 manifest_commit=$(awk -F '\t' '$1 == "# commit" {print $2; exit}' "$tmp/release-manifest.tsv")
 printf '%s' "$manifest_commit" | grep -Eq '^[0-9a-fA-F]{40}$' || fail 'manifest commit is not a full SHA'
 grep -F '"schema_version": 1' "$tmp/release-manifest.json" >/dev/null || fail 'JSON manifest schema mismatch'

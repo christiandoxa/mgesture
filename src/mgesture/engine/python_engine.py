@@ -17,8 +17,8 @@ from .models import (
 _LANDMARK_COUNT = 63
 _LANDMARK_ABS_LIMIT = 2.0
 _MIN_PALM_SCALE = 1e-4
-_SCROLL_ENTRY_REACH = 0.88
-_SCROLL_ACTIVE_REACH = 0.78
+_SCROLL_ENTRY_REACH = 0.85
+_SCROLL_ACTIVE_REACH = 0.77
 _SCROLL_RELAXED_REACH = 1.30
 _SCROLL_ENTRY_STRAIGHTNESS = 0.70
 _SCROLL_ACTIVE_STRAIGHTNESS = 0.60
@@ -88,6 +88,10 @@ def _is_relaxed(
     straightness: float = _SCROLL_RELAXED_STRAIGHTNESS,
 ) -> bool:
     return not (geometry[0] >= reach and geometry[1] >= straightness)
+
+
+def _extension_score(geometry: tuple[float, float]) -> float:
+    return min(geometry[0] / _SCROLL_ENTRY_REACH, geometry[1] / _SCROLL_ENTRY_STRAIGHTNESS)
 
 
 class _LowPass:
@@ -161,6 +165,14 @@ class _Measurements:
     palm_y: float
     index_x: float
     index_y: float
+    index_extension_score: float
+    middle_extension_score: float
+    ring_extension_score: float
+    pinky_extension_score: float
+    index_extended: bool
+    middle_extended: bool
+    ring_extended: bool
+    pinky_extended: bool
     scroll_fingers_ready: bool
     scroll_active_fingers_ready: bool
     scroll_pinch_clear: bool
@@ -190,6 +202,7 @@ class PythonGestureEngine:
         self._scroll_since: float | None = None
         self._scroll_exit_since: float | None = None
         self._scroll_anchor: tuple[float, float] | None = None
+        self._scroll_delta_y = 0.0
         self._scroll_remainder = 0.0
         self._open_since: float | None = None
         self._last_toggle: float = -math.inf
@@ -244,6 +257,7 @@ class PythonGestureEngine:
         self._scroll_since = None
         self._scroll_exit_since = None
         self._scroll_anchor = None
+        self._scroll_delta_y = 0.0
         self._scroll_remainder = 0.0
 
     @staticmethod
@@ -293,9 +307,11 @@ class PythonGestureEngine:
             )
             and not open_palm
         )
+        # A neutral thumb between down and release is not an active pinch; click
+        # arbitration still runs first and therefore retains precedence.
         scroll_pinch_clear = (
-            index_pinch > self.config.pinch_release_threshold
-            and middle_pinch > self.config.pinch_release_threshold
+            index_pinch > self.config.pinch_down_threshold
+            and middle_pinch > self.config.pinch_down_threshold
         )
         scroll_active_pinch_clear = (
             index_pinch > self.config.pinch_down_threshold
@@ -310,6 +326,14 @@ class PythonGestureEngine:
             palm_y,
             index_x,
             index_y,
+            _extension_score(index_geometry),
+            _extension_score(middle_geometry),
+            _extension_score(ring_geometry),
+            _extension_score(pinky_geometry),
+            index_extended,
+            middle_extended,
+            ring_extended,
+            pinky_extended,
             scroll_fingers_ready,
             scroll_active_fingers_ready,
             scroll_pinch_clear,
@@ -329,6 +353,16 @@ class PythonGestureEngine:
             "palm_y": measurements.palm_y,
             "index_x": measurements.index_x,
             "index_y": measurements.index_y,
+            "index_extension_score": measurements.index_extension_score,
+            "middle_extension_score": measurements.middle_extension_score,
+            "ring_extension_score": measurements.ring_extension_score,
+            "pinky_extension_score": measurements.pinky_extension_score,
+            "index_extended": measurements.index_extended,
+            "middle_extended": measurements.middle_extended,
+            "ring_extended": measurements.ring_extended,
+            "pinky_extended": measurements.pinky_extended,
+            "no_active_pinch": measurements.scroll_active_pinch_clear,
+            "scroll_block_reason": self._scroll_block_reason(measurements),
             "scroll_fingers_ready": measurements.scroll_fingers_ready,
             "scroll_active_fingers_ready": measurements.scroll_active_fingers_ready,
             "scroll_pinch_clear": measurements.scroll_pinch_clear,
@@ -420,6 +454,7 @@ class PythonGestureEngine:
             return
         _, last_y = self._scroll_anchor
         dy = current[1] - last_y
+        self._scroll_delta_y = dy
         if abs(dy) <= self.config.scroll_dead_zone:
             return
         direction = 1.0 if dy > 0.0 else -1.0
@@ -432,6 +467,20 @@ class PythonGestureEngine:
         if steps:
             self._scroll_remainder -= steps
             actions.append(Action.scroll(0.0, float(steps)))
+
+    @staticmethod
+    def _scroll_block_reason(measurements: _Measurements) -> str:
+        if not measurements.index_extended:
+            return "index_not_extended"
+        if not measurements.middle_extended:
+            return "middle_not_extended"
+        if measurements.ring_extended:
+            return "ring_too_extended"
+        if measurements.pinky_extended:
+            return "pinky_too_extended"
+        if not measurements.scroll_pinch_clear:
+            return "pinch_conflict"
+        return "ready"
 
     def _scroll_entry_progress(self, now: float) -> float:
         if self.state is GestureState.SCROLL:
@@ -498,6 +547,9 @@ class PythonGestureEngine:
                     "scroll_active": self.state is GestureState.SCROLL,
                     "scroll_entry_progress": self._scroll_entry_progress(now),
                     "scroll_exit_grace": self._scroll_exit_since is not None,
+                    "scroll_delta_y": self._scroll_delta_y,
+                    "scroll_remainder": self._scroll_remainder,
+                    "scroll_block_reason": "hand_loss",
                 },
             )
 
@@ -532,6 +584,15 @@ class PythonGestureEngine:
             "reacquiring": reacquiring,
             "index_pinch": measurements.index_pinch,
             "middle_pinch": measurements.middle_pinch,
+            "index_extension_score": measurements.index_extension_score,
+            "middle_extension_score": measurements.middle_extension_score,
+            "ring_extension_score": measurements.ring_extension_score,
+            "pinky_extension_score": measurements.pinky_extension_score,
+            "index_extended": measurements.index_extended,
+            "middle_extended": measurements.middle_extended,
+            "ring_extended": measurements.ring_extended,
+            "pinky_extended": measurements.pinky_extended,
+            "no_active_pinch": measurements.scroll_active_pinch_clear,
             "scroll_fingers_ready": measurements.scroll_fingers_ready,
             "scroll_active_fingers_ready": measurements.scroll_active_fingers_ready,
             "scroll_pinch_clear": measurements.scroll_pinch_clear,
@@ -541,6 +602,10 @@ class PythonGestureEngine:
             "scroll_active": self.state is GestureState.SCROLL,
             "scroll_entry_progress": self._scroll_entry_progress(now),
             "scroll_exit_grace": self._scroll_exit_since is not None,
+            "palm_y": measurements.palm_y,
+            "scroll_delta_y": self._scroll_delta_y,
+            "scroll_remainder": self._scroll_remainder,
+            "scroll_block_reason": self._scroll_block_reason(measurements),
             "engine": self.name,
         }
         if not self.armed or reacquiring:
@@ -626,6 +691,8 @@ class PythonGestureEngine:
             diagnostics["scroll_active"] = False
             diagnostics["scroll_entry_progress"] = 0.0
             diagnostics["scroll_exit_grace"] = False
+            diagnostics["scroll_delta_y"] = 0.0
+            diagnostics["scroll_remainder"] = 0.0
 
         pointer = self._pointer(measurements, now)
         if pointer is not None:

@@ -11,7 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .compute import capabilities_dict, detect_hardware, select_compute_plan
-from .config import AppConfig, config_path, validate
+from .config import (
+    AppConfig,
+    config_path,
+    effective_handedness_mirror,
+    effective_preview_mirror,
+    validate,
+)
 from .engine import EngineConfig, EngineUnavailableError, create_engine
 from .engine.mojo_engine import NativeMojoGestureEngine, native_library_name
 from .input import create_backend
@@ -203,7 +209,7 @@ def collect_checks(
                     config.vision.presence_confidence,
                     config.vision.tracking_confidence,
                     "gpu",
-                    config.vision.handedness_mirrored_input,
+                    effective_handedness_mirror(config.vision),
                     config.vision.hand_selection,
                 )
                 probe.close()
@@ -257,6 +263,16 @@ def collect_checks(
             f"loaded={'yes' if engine_status['native_mojo_engine_loaded'] else 'no'}; "
             f"Python engine={'available' if engine_status['python_engine_available'] else 'unavailable'}; "
             f"active={engine_status['active_engine']}",
+        )
+    )
+    checks.append(
+        Check(
+            "hand tracking",
+            True,
+            f"selection={config.vision.hand_selection.value}; "
+            f"camera handedness mirror={'on' if effective_handedness_mirror(config.vision) else 'off'}; "
+            f"preview mirror={'on' if effective_preview_mirror(config.camera) else 'off'}",
+            required=False,
         )
     )
     checks.append(
@@ -471,6 +487,12 @@ def report_json(config: AppConfig, checks: list[Check], runtime: bool = False) -
         "gesture_engine": {
             "requested": engine_request,
             **engine_status,
+        },
+        "hand_tracking": {
+            "selection": config.vision.hand_selection.value,
+            "camera_handedness_mirror": effective_handedness_mirror(config.vision),
+            "preview_mirror": effective_preview_mirror(config.camera),
+            "active_hand": None,
         },
         "model": str(
             available_model(Path(config.vision.model_path))

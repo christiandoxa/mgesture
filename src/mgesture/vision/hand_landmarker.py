@@ -154,7 +154,7 @@ class HandLandmarker:
             self._last_result_timestamp_ms = timestamp_ms
             if self._latest_result is not None:
                 self.dropped_results += 1
-            self._latest_result = LandmarkResult(timestamp_ms, detected, hand_changed)
+            self._latest_result = LandmarkResult(timestamp_ms, detected, hand_changed, tuple(hands))
             self.completed_frames += 1
 
     def _select_hand(self, hands: list[DetectedHand]) -> tuple[DetectedHand | None, bool]:
@@ -175,18 +175,10 @@ class HandLandmarker:
                 self._switch_candidate_frames = 0
                 return current, False
         if not eligible:
+            self._switch_candidate = None
+            self._switch_candidate_frames = 0
             return None, False
-        if selection is HandSelection.AUTO:
-            candidate = next(
-                (
-                    hand
-                    for hand in eligible
-                    if PhysicalHand.coerce(hand.frame.handedness) is PhysicalHand.RIGHT
-                ),
-                eligible[0],
-            )
-        else:
-            candidate = eligible[0]
+        candidate = max(eligible, key=lambda hand: hand.frame.handedness_confidence)
         candidate_hand = PhysicalHand.coerce(candidate.frame.handedness)
         if locked is None:
             self._locked_hand = candidate_hand
@@ -270,6 +262,7 @@ class HandLandmarker:
         with self._lock:
             return {
                 "compute": self.compute,
+                "handedness_mirrored_input": self._handedness_mirrored_input,
                 "hand_selection": HandSelection.coerce(
                     getattr(self, "hand_selection", HandSelection.RIGHT)
                 ).value,
@@ -299,6 +292,18 @@ class HandLandmarker:
             )
             self._submitted.clear()
             self._image_buffers.clear()
+
+    def set_handedness_mirrored_input(self, mirrored: bool) -> None:
+        """Change the one-time input-orientation interpretation and clear hand continuity."""
+        with self._lock:
+            self._handedness_mirrored_input = mirrored
+            self._locked_hand = None
+            self._switch_candidate = None
+            self._switch_candidate_frames = 0
+            self._latest_result = None
+            self._discard_before_timestamp_ms = max(
+                self._discard_before_timestamp_ms, self._last_submitted_timestamp_ms
+            )
 
     def close(self) -> None:
         with self._lock:

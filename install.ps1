@@ -40,7 +40,7 @@ $Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitect
 if ($Architecture -eq "X64") { $Target = "x86_64-pc-windows-msvc" } elseif ($Architecture -eq "Arm64") { $Target = "aarch64-pc-windows-msvc" } else { Fail "unsupported Windows architecture: $Architecture" }
 if ([string]::IsNullOrWhiteSpace($Base)) {
     if ($Release -eq "latest") { $Base = "https://github.com/$Repository/releases/latest/download" }
-    else { $Base = "https://github.com/$Repository/releases/download/$Release" }
+    else { $Base = "https://github.com/$Repository/releases/download/v$Release" }
 }
 
 try {
@@ -56,6 +56,7 @@ try {
     if ($Asset -cnotmatch "^mgesture-$([regex]::Escape($Target))\.zip$") { Fail "release manifest asset mismatch for $Target" }
     $Tsv = Get-Content -LiteralPath (Join-Path $Temp "release-manifest.tsv")
     $Version = ($Tsv | Where-Object { $_ -like "# version`t*" } | Select-Object -First 1).Split("`t")[1]
+    if ($Release -cne "latest" -and $Version -cne $Release) { Fail "requested release differs from manifest version" }
     $Commit = ($Tsv | Where-Object { $_ -like "# commit`t*" } | Select-Object -First 1).Split("`t")[1]
     if ($Commit -notmatch "^[0-9a-fA-F]{40}$") { Fail "manifest commit is not a full SHA" }
     if ((Get-Expected (Join-Path $Temp "SHA256SUMS") "release-manifest.json") -ne (Get-Digest (Join-Path $Temp "release-manifest.json"))) { Fail "JSON manifest checksum mismatch" }

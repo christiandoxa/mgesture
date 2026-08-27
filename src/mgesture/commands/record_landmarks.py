@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 
-from mgesture.config import AppConfig
+from mgesture.config import AppConfig, effective_handedness_mirror
 from mgesture.vision import Camera, HandLandmarker, available_model
 
 
@@ -49,7 +49,7 @@ def record_landmarks(
             config.vision.presence_confidence,
             config.vision.tracking_confidence,
             "cpu",
-            config.vision.handedness_mirrored_input,
+            effective_handedness_mirror(config.vision),
             config.vision.hand_selection,
         ) as landmarker,
     ):
