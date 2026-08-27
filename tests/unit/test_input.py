@@ -133,6 +133,7 @@ def test_x11_layout_queries_xrandr_without_falling_back_to_fake_bounds(
     import mgesture.input.pynput_backend as x11
 
     monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setattr(x11.sys, "platform", "linux")
     monkeypatch.setattr(
         x11.subprocess,
         "run",
