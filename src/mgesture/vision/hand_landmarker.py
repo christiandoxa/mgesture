@@ -17,8 +17,7 @@ class HandLandmarker:
     """Persistent MediaPipe context with bounded async work and hand selection."""
 
     _MAX_PENDING = 1
-    # ponytail: fixed frame debounce; use tracker IDs only if MediaPipe exposes them.
-    _HAND_SWITCH_FRAMES = 3
+    _HAND_SWITCH_MS = 120
 
     def __init__(
         self,
@@ -47,7 +46,7 @@ class HandLandmarker:
         self.hand_selection = HandSelection.coerce(hand_selection)
         self._locked_hand: PhysicalHand | None = None
         self._switch_candidate: PhysicalHand | None = None
-        self._switch_candidate_frames = 0
+        self._switch_candidate_since_ms: int | None = None
         self._latest_result: LandmarkResult | None = None
         self._last_result_timestamp_ms = -1
         self._last_polled_timestamp_ms = -1
@@ -150,14 +149,16 @@ class HandLandmarker:
             ):
                 self.dropped_results += 1
                 return
-            detected, hand_changed = self._select_hand(hands)
+            detected, hand_changed = self._select_hand(hands, timestamp_ms)
             self._last_result_timestamp_ms = timestamp_ms
             if self._latest_result is not None:
                 self.dropped_results += 1
             self._latest_result = LandmarkResult(timestamp_ms, detected, hand_changed, tuple(hands))
             self.completed_frames += 1
 
-    def _select_hand(self, hands: list[DetectedHand]) -> tuple[DetectedHand | None, bool]:
+    def _select_hand(
+        self, hands: list[DetectedHand], timestamp_ms: int
+    ) -> tuple[DetectedHand | None, bool]:
         """Select one physical hand and retain it while both hands are visible."""
         selection = getattr(self, "hand_selection", None)
         if selection is None:
@@ -172,11 +173,11 @@ class HandLandmarker:
             )
             if current is not None:
                 self._switch_candidate = None
-                self._switch_candidate_frames = 0
+                self._switch_candidate_since_ms = None
                 return current, False
         if not eligible:
             self._switch_candidate = None
-            self._switch_candidate_frames = 0
+            self._switch_candidate_since_ms = None
             return None, False
         candidate = max(eligible, key=lambda hand: hand.frame.handedness_confidence)
         candidate_hand = PhysicalHand.coerce(candidate.frame.handedness)
@@ -185,14 +186,18 @@ class HandLandmarker:
             return candidate, False
         if self._switch_candidate is not candidate_hand:
             self._switch_candidate = candidate_hand
-            self._switch_candidate_frames = 1
+            self._switch_candidate_since_ms = timestamp_ms
         else:
-            self._switch_candidate_frames += 1
-        if self._switch_candidate_frames < self._HAND_SWITCH_FRAMES:
+            if self._switch_candidate_since_ms is None:
+                self._switch_candidate_since_ms = timestamp_ms
+        if (
+            self._switch_candidate_since_ms is None
+            or timestamp_ms - self._switch_candidate_since_ms < self._HAND_SWITCH_MS
+        ):
             return None, False
         self._locked_hand = candidate_hand
         self._switch_candidate = None
-        self._switch_candidate_frames = 0
+        self._switch_candidate_since_ms = None
         return candidate, True
 
     def submit(self, image: Any, timestamp_ms: int) -> bool:
@@ -286,7 +291,7 @@ class HandLandmarker:
             self._latest_result = None
             self._locked_hand = None
             self._switch_candidate = None
-            self._switch_candidate_frames = 0
+            self._switch_candidate_since_ms = None
             self._discard_before_timestamp_ms = max(
                 self._discard_before_timestamp_ms, self._last_submitted_timestamp_ms
             )
@@ -299,7 +304,7 @@ class HandLandmarker:
             self._handedness_mirrored_input = mirrored
             self._locked_hand = None
             self._switch_candidate = None
-            self._switch_candidate_frames = 0
+            self._switch_candidate_since_ms = None
             self._latest_result = None
             self._discard_before_timestamp_ms = max(
                 self._discard_before_timestamp_ms, self._last_submitted_timestamp_ms
@@ -312,7 +317,7 @@ class HandLandmarker:
             self._closed = True
             self._locked_hand = None
             self._switch_candidate = None
-            self._switch_candidate_frames = 0
+            self._switch_candidate_since_ms = None
             self._submitted.clear()
             self._image_buffers.clear()
         self._landmarker.close()

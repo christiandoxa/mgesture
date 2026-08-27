@@ -19,7 +19,7 @@ def _bare_landmarker(
         landmarker.hand_selection = hand_selection
         landmarker._locked_hand = None
         landmarker._switch_candidate = None
-        landmarker._switch_candidate_frames = 0
+        landmarker._switch_candidate_since_ms = None
     landmarker._latest_result = None
     landmarker._last_result_timestamp_ms = -1
     landmarker._last_polled_timestamp_ms = -1
@@ -151,8 +151,8 @@ def test_landmarker_locks_auto_selection_when_result_order_changes() -> None:
     first = _deliver(landmarker, 1, ("Right", "Left"))
     reordered = _deliver(landmarker, 2, ("Left", "Right"))
     waiting_one = _deliver(landmarker, 3, ("Left",))
-    waiting_two = _deliver(landmarker, 4, ("Left",))
-    switched = _deliver(landmarker, 5, ("Left",))
+    waiting_two = _deliver(landmarker, 100, ("Left",))
+    switched = _deliver(landmarker, 125, ("Left",))
 
     assert first is not None and first.hand is not None
     assert first.hand.frame.handedness is PhysicalHand.RIGHT
