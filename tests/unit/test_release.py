@@ -189,6 +189,15 @@ def test_ci_matrix_uses_all_stable_targets_and_native_runners() -> None:
     assert all(row["asset"] == targets[row["target"]].asset for row in rows)
 
 
+def test_bundle_smoke_rejects_archive_path_escape(tmp_path: Path) -> None:
+    from smoke_bundle import _safe_destination
+
+    root = tmp_path / "extract"
+    root.mkdir()
+    with pytest.raises(ValueError, match="unsafe archive member"):
+        _safe_destination(root, "mgesture/../../outside")
+
+
 def test_windows_tool_lookup_matches_target_architecture(monkeypatch: pytest.MonkeyPatch) -> None:
     import build_mojo_library
 

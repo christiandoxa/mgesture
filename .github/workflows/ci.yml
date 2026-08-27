@@ -44,10 +44,9 @@ jobs:
         uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
           pixi-version: v0.77.1
-          run-install: false
-          cache: false
-      - name: Install environment
-        run: pixi install --locked
+          cache: true
+          cache-key: mgesture-pixi-0.77.1-x86_64-unknown-linux-gnu-standard-${{ hashFiles('pixi.toml', 'pyproject.toml') }}-
+          cache-write: ${{ github.ref == 'refs/heads/main' }}
       - name: Inspect Mojo compiler targets
         run: |
           pixi run mojo --version
@@ -68,6 +67,36 @@ jobs:
           path: mojo-objects
           if-no-files-found: error
 
+  prepare_model:
+    name: Prepare verified model
+    needs: prepare_matrix
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: v0.77.1
+          cache: true
+          cache-key: mgesture-pixi-0.77.1-x86_64-unknown-linux-gnu-standard-${{ hashFiles('pixi.toml', 'pyproject.toml') }}-
+          cache-write: ${{ github.ref == 'refs/heads/main' }}
+      - name: Download and verify pinned model
+        run: |
+          mkdir -p model
+          pixi run python -m mgesture model install --path model/hand_landmarker.task
+          pixi run python -c "from pathlib import Path; from mgesture.vision.model_manager import MODEL_SHA256, checksum; path=Path('model/hand_landmarker.task'); assert checksum(path) == MODEL_SHA256"
+      - name: Upload verified model
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: verified-model
+          path: model/hand_landmarker.task*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
   quality:
     name: Quality (platform-independent)
     runs-on: ubuntu-24.04
@@ -80,10 +109,9 @@ jobs:
         uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
           pixi-version: v0.77.1
-          run-install: false
-          cache: false
-      - name: Install environment
-        run: pixi install --locked
+          cache: true
+          cache-key: mgesture-pixi-0.77.1-x86_64-unknown-linux-gnu-standard-${{ hashFiles('pixi.toml', 'pyproject.toml') }}-
+          cache-write: ${{ github.ref == 'refs/heads/main' }}
       - name: Test
         run: pixi run test
       - name: Lint
@@ -109,12 +137,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Set up Pixi
-        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
-        with:
-          pixi-version: v0.77.1
-          run-install: false
-          cache: false
       - name: Configure Windows ARM OpenCV build
         if: matrix.target == 'aarch64-pc-windows-msvc'
         shell: pwsh
@@ -122,8 +144,13 @@ jobs:
           echo "CMAKE_ARGS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
           echo "SKBUILD_CONFIGURE_OPTIONS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
           echo "PIXI_CACHE_DIR=C:\\p" >> $env:GITHUB_ENV
-      - name: Install environment
-        run: pixi install --locked
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: v0.77.1
+          cache: true
+          cache-key: mgesture-pixi-0.77.1-${{ matrix.target }}-${{ matrix.target == 'aarch64-pc-windows-msvc' && 'opencv-dnn-off-neon-off' || 'standard' }}-${{ hashFiles('pixi.toml', 'pyproject.toml') }}-
+          cache-write: ${{ github.ref == 'refs/heads/main' }}
       - name: Validate native runner architecture
         run: pixi run python scripts/release/validate_architecture.py runner --target ${{ matrix.target }}
       - name: Validate canonical target row
@@ -131,10 +158,12 @@ jobs:
           pixi run python -c
           "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
           row = target('${{ matrix.target }}'); assert row.runner == '${{ matrix.runner }}'"
+      - name: Platform smoke tests
+        run: pixi run pytest -q tests/unit/test_camera.py tests/unit/test_input.py tests/unit/test_release_architecture.py
       - name: Python engine self-test
         run: pixi run python -m mgesture self-test --headless --fake-input --engine python
   mojo:
-    needs: [prepare_matrix, build_mojo_objects]
+    needs: [prepare_matrix, build_mojo_objects, prepare_model]
     name: Mojo ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -145,12 +174,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Set up Pixi
-        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
-        with:
-          pixi-version: v0.77.1
-          run-install: false
-          cache: false
       - name: Configure Windows ARM OpenCV build
         if: matrix.target == 'aarch64-pc-windows-msvc'
         shell: pwsh
@@ -158,8 +181,18 @@ jobs:
           echo "CMAKE_ARGS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
           echo "SKBUILD_CONFIGURE_OPTIONS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
           echo "PIXI_CACHE_DIR=C:\\p" >> $env:GITHUB_ENV
-      - name: Install environment
-        run: pixi install --locked
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          pixi-version: v0.77.1
+          cache: true
+          cache-key: mgesture-pixi-0.77.1-${{ matrix.target }}-${{ matrix.target == 'aarch64-pc-windows-msvc' && 'opencv-dnn-off-neon-off' || 'standard' }}-${{ hashFiles('pixi.toml', 'pyproject.toml') }}-
+          cache-write: ${{ github.ref == 'refs/heads/main' }}
+      - name: Download verified model
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: verified-model
+          path: model
       - name: Download cross-target Mojo object
         if: matrix.mojo_build_mode == 'cross-object'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -233,6 +266,45 @@ jobs:
         run: pixi run python -m mgesture self-test --headless --fake-input --engine mojo
       - name: Deterministic replay
         run: pixi run python -m mgesture replay --engine mojo
+      - name: Build standalone candidate (Unix)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(pixi run python -c 'from mgesture.version import __version__; print(__version__)')"
+          library=build/libmgesture_mojo.so
+          if [ "$RUNNER_OS" = macOS ]; then library=build/libmgesture_mojo.dylib; fi
+          pixi run python scripts/release/build_bundle.py \
+            --target "${{ matrix.target }}" \
+            --output "dist/${{ matrix.asset }}" \
+            --model model/hand_landmarker.task \
+            --version "$version" \
+            --commit "$GITHUB_SHA" \
+            --mojo-library "$library"
+      - name: Build standalone candidate (Windows)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (pixi run python -c "from mgesture.version import __version__; print(__version__)").Trim()
+          pixi run python scripts/release/build_bundle.py `
+            --target "${{ matrix.target }}" `
+            --output "dist/${{ matrix.asset }}" `
+            --model "model/hand_landmarker.task" `
+            --version $version `
+            --commit $env:GITHUB_SHA `
+            --mojo-library "build/mgesture_mojo.dll"
+      - name: Smoke standalone candidate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: pixi run python scripts/release/smoke_bundle.py --archive "dist/${{ matrix.asset }}" --target "${{ matrix.target }}"
+      - name: Upload standalone candidate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: standalone-candidate-${{ matrix.target }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
   release-dry-run:
     name: Standalone Linux dry run
@@ -247,21 +319,23 @@ jobs:
         uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
           pixi-version: v0.77.1
-          run-install: false
-          cache: false
-      - name: Install environment and pinned model
-        run: |
-          pixi install --locked
-          pixi run python -m mgesture model install
+          cache: true
+          cache-key: mgesture-pixi-0.77.1-x86_64-unknown-linux-gnu-standard-${{ hashFiles('pixi.toml', 'pyproject.toml') }}-
+          cache-write: ${{ github.ref == 'refs/heads/main' }}
+      - name: Download exact main candidate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: standalone-candidate-x86_64-unknown-linux-gnu
+          path: dist
+      - name: Install model for non-main representative build
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+        run: pixi run python -m mgesture model install
       - name: Validate native runner architecture
         run: pixi run python scripts/release/validate_architecture.py runner --target x86_64-unknown-linux-gnu
-      - name: Build and smoke standalone bundle
+      - name: Build representative standalone bundle for non-main CI
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         run: |
           pixi run package-local
-          mkdir -p "$RUNNER_TEMP/mgesture-smoke"
-          tar -xzf dist/mgesture-x86_64-unknown-linux-gnu.tar.gz -C "$RUNNER_TEMP/mgesture-smoke"
-          pixi run python scripts/release/validate_mojo_source.py --root "$RUNNER_TEMP/mgesture-smoke/mgesture"
-          pixi run python scripts/release/validate_architecture.py bundle --target x86_64-unknown-linux-gnu --root "$RUNNER_TEMP/mgesture-smoke/mgesture"
-          "$RUNNER_TEMP/mgesture-smoke/mgesture/bin/mgesture" --version
-          "$RUNNER_TEMP/mgesture-smoke/mgesture/bin/mgesture" self-test --headless --fake-input --engine mojo
-          "$RUNNER_TEMP/mgesture-smoke/mgesture/bin/mgesture" replay --engine mojo --fixture "$RUNNER_TEMP/mgesture-smoke/mgesture/share/mgesture/fixtures/basic.json" >/dev/null
+      - name: Smoke standalone bundle
+        run: pixi run python scripts/release/smoke_bundle.py --archive dist/mgesture-x86_64-unknown-linux-gnu.tar.gz --target x86_64-unknown-linux-gnu

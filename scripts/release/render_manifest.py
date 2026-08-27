@@ -101,6 +101,12 @@ def render(version: str, commit: str, assets: Path, output: Path) -> None:
         if not asset_path.exists():
             raise RuntimeError(f"missing required target asset: {target.asset}")
         metadata = archive_metadata(asset_path, target.format)
+        if metadata.get("schema_version") == 1 and (
+            metadata.get("version") != version
+            or metadata.get("commit") != commit
+            or metadata.get("target") != name
+        ):
+            raise RuntimeError(f"candidate metadata does not match requested release: {name}")
         mojo_source_sha256 = str(metadata.get("mojo_source_sha256", source_metadata["sha256"]))
         mojo_source_files = metadata.get("mojo_source_files", source_metadata["files"])
         vision_backend = str(metadata.get("vision_backend", "mediapipe"))

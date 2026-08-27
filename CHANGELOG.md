@@ -34,6 +34,12 @@
 - Kept preview mirroring, inference handedness interpretation, and pointer mirroring as independent cross-platform settings.
 - Added extracted-package reset-preservation coverage to the standalone release smoke path.
 
+### Build / CI
+
+- Consolidated platform-independent quality checks into one CI owner while retaining meaningful six-target Python and six-target Mojo validation.
+- Added target-, lockfile-, manifest-, and Windows ARM build-flag-aware Pixi environment caching, plus one verified model artifact per CI run.
+- Built exact-SHA standalone candidates once in successful main CI and reused those validated bytes in the official release workflow.
+
 ### Documentation
 
 - Documented left/right hand control, mirror troubleshooting, precise scroll posing, update/reset ownership, and generic Linux/macOS/Windows platform terminology.

@@ -29,13 +29,13 @@ jobs:
     outputs:
       version: ${{ steps.target.outputs.version }}
       target_sha: ${{ steps.target.outputs.target_sha }}
-      targets: ${{ steps.matrix.outputs.targets }}
+      ci_run_id: ${{ steps.ci.outputs.ci_run_id }}
     steps:
       - name: Check out exact commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.target_sha }}
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
       - name: Validate dispatch target and version
         id: target
@@ -50,242 +50,52 @@ jobs:
           version="$(python3 scripts/release/validate_version.py --version "${REQUESTED_VERSION}")"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "target_sha=${REQUESTED_SHA}" >> "$GITHUB_OUTPUT"
-      - name: Wait for successful CI run at exact SHA
+      - name: Resolve successful exact-SHA CI and candidate artifacts
+        id: ci
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
           for attempt in $(seq 1 60); do
-            result="$(gh run list --workflow ci.yml --event push --limit 50 --json headSha,status,conclusion --jq '.[] | select(.headSha == env.TARGET_SHA) | [.status,.conclusion] | @tsv' | head -n1 || true)"
-            if [ "${result}" = $'completed\tsuccess' ]; then exit 0; fi
-            if printf '%s' "${result}" | grep -q $'^completed\t'; then echo "exact-SHA CI did not pass: ${result}" >&2; exit 1; fi
-            sleep 30
+            record="$(gh run list --workflow ci.yml --event push --limit 50 --json databaseId,headSha,status,conclusion --jq '[.[] | select(.headSha == env.TARGET_SHA)] | .[0] // empty' || true)"
+            if [ -z "${record}" ]; then
+              sleep 30
+              continue
+            fi
+            status="$(printf '%s' "${record}" | jq -r '.status')"
+            conclusion="$(printf '%s' "${record}" | jq -r '.conclusion // empty')"
+            if [ "${status}" != completed ]; then
+              sleep 30
+              continue
+            fi
+            if [ "${conclusion}" != success ]; then
+              echo "exact-SHA CI did not pass: ${status}/${conclusion}" >&2
+              exit 1
+            fi
+            ci_run_id="$(printf '%s' "${record}" | jq -r '.databaseId')"
+            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run_id}")"
+            test "$(printf '%s' "${run_json}" | jq -r '.head_sha')" = "${TARGET_SHA}"
+            test "$(printf '%s' "${run_json}" | jq -r '.head_branch')" = main
+            test "$(printf '%s' "${run_json}" | jq -r '.event')" = push
+            python_jobs="$(gh run view "${ci_run_id}" --json jobs --jq '[.jobs[] | select(.name | startswith("Python ")) | select(.conclusion == "success")] | length')"
+            mojo_jobs="$(gh run view "${ci_run_id}" --json jobs --jq '[.jobs[] | select(.name | startswith("Mojo ")) | select(.conclusion == "success")] | length')"
+            candidate_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run_id}/artifacts" --jq '[.artifacts[] | select(.name | startswith("standalone-candidate-"))] | length')"
+            test "${python_jobs}" = 6
+            test "${mojo_jobs}" = 6
+            test "${candidate_count}" = 6
+            echo "ci_run_id=${ci_run_id}" >> "$GITHUB_OUTPUT"
+            exit 0
           done
-          echo 'timed out waiting for exact-SHA CI' >&2
+          echo 'timed out waiting for exact-SHA CI and six candidate artifacts' >&2
           exit 1
-      - name: Generate canonical release matrix
-        id: matrix
-        run: |
-          targets="$(python3 scripts/release/prepare_ci_matrix.py)"
-          echo "targets=${targets}" >> "$GITHUB_OUTPUT"
-
-  build_mojo_objects:
-    name: Build cross-target Mojo objects
-    needs: verify-ci
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out exact commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ needs.verify-ci.outputs.target_sha }}
-          persist-credentials: false
-      - name: Set up Pixi
-        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
-        with:
-          pixi-version: v0.77.1
-          run-install: false
-          cache: false
-      - name: Install environment
-        run: pixi install --locked
-      - name: Inspect Mojo compiler
-        run: |
-          pixi run mojo --version
-          pixi run mojo build --print-supported-targets
-      - name: Emit cross-target Mojo objects
-        run: pixi run python scripts/release/build_mojo_objects.py --output-dir mojo-objects
-      - name: Probe all Mojo target capabilities
-        run: pixi run python scripts/release/probe_mojo_target.py --all --output mojo-objects/mojo-capability.json
-      - name: Validate cross-target object set
-        run: test "$(find mojo-objects -maxdepth 1 -type f -name '*.o' | wc -l)" = 3
-      - name: Upload cross-target Mojo objects
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: mojo-cross-objects
-          path: mojo-objects
-          if-no-files-found: error
-
-  build:
-    name: Build ${{ matrix.target }}
-    needs: [verify-ci, build_mojo_objects]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.verify-ci.outputs.targets) }}
-    steps:
-      - name: Check out exact commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ needs.verify-ci.outputs.target_sha }}
-          persist-credentials: false
-      - name: Set up Pixi
-        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
-        with:
-          pixi-version: v0.77.1
-          run-install: false
-          cache: false
-      - name: Configure Windows ARM OpenCV build
-        if: matrix.target == 'aarch64-pc-windows-msvc'
-        shell: pwsh
-        run: |
-          echo "CMAKE_ARGS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
-          echo "SKBUILD_CONFIGURE_OPTIONS=-DBUILD_opencv_dnn=OFF -DENABLE_NEON=OFF" >> $env:GITHUB_ENV
-          echo "PIXI_CACHE_DIR=C:\\p" >> $env:GITHUB_ENV
-      - name: Install dependencies and model
-        run: |
-          pixi install --locked
-          pixi run python -m mgesture model install
-      - name: Download cross-target Mojo object
-        if: matrix.mojo_build_mode == 'cross-object'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: mojo-cross-objects
-          path: mojo-objects
-      - name: Validate native runner architecture
-        run: pixi run python scripts/release/validate_architecture.py runner --target ${{ matrix.target }}
-      - name: Validate canonical target row
-        run: >-
-          pixi run python -c
-          "import sys; sys.path.insert(0, 'scripts/release'); from release_targets import target;
-          row = target('${{ matrix.target }}'); assert row.publishable and row.runner == '${{ matrix.runner }}' and row.asset == '${{ matrix.asset }}' and row.mojo_ci_mode == 'native' and row.mojo_build_mode == '${{ matrix.mojo_build_mode }}'"
-      - name: Build native Mojo library (Linux)
-        if: matrix.mojo_build_mode == 'native' && runner.os == 'Linux'
-        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --output build/libmgesture_mojo.so
-      - name: Build native Mojo library (macOS)
-        if: matrix.mojo_build_mode == 'native' && runner.os == 'macOS'
-        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --output build/libmgesture_mojo.dylib
-      - name: Link cross-target Mojo library (macOS)
-        if: matrix.mojo_build_mode == 'cross-object' && runner.os == 'macOS'
-        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --object mojo-objects/${{ matrix.target }}.o --output build/libmgesture_mojo.dylib
-      - name: Link cross-target Mojo library (Windows)
-        if: matrix.mojo_build_mode == 'cross-object' && runner.os == 'Windows'
-        run: pixi run python scripts/release/build_mojo_library.py --target ${{ matrix.target }} --object mojo-objects/${{ matrix.target }}.o --output build/mgesture_mojo.dll
-      - name: Validate native Mojo ABI (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          library=build/libmgesture_mojo.so
-          if [ "$RUNNER_OS" = macOS ]; then library=build/libmgesture_mojo.dylib; fi
-          pixi run python scripts/release/validate_mojo_abi.py --target "${{ matrix.target }}" --library "$library"
-      - name: Validate native Mojo ABI (Windows)
-        if: runner.os == 'Windows'
-        run: pixi run python scripts/release/validate_mojo_abi.py --target ${{ matrix.target }} --library build/mgesture_mojo.dll
-      - name: Probe native Mojo library (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          object=build/libmgesture_mojo.o
-          if [ "${{ matrix.mojo_build_mode }}" = cross-object ]; then object="mojo-objects/${{ matrix.target }}.o"; fi
-          library=build/libmgesture_mojo.so
-          if [ "$RUNNER_OS" = macOS ]; then library=build/libmgesture_mojo.dylib; fi
-          pixi run python scripts/release/probe_mojo_target.py --target "${{ matrix.target }}" --object "$object" --library "$library" --output build/mojo-probe.json
-          pixi run python -c "import json; report=json.load(open('build/mojo-probe.json')); assert report['targets']['${{ matrix.target }}']['native']['executed'] is True"
-      - name: Probe native Mojo library (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $object = "mojo-objects\${{ matrix.target }}.o"
-          $library = "build\mgesture_mojo.dll"
-          pixi run python scripts/release/probe_mojo_target.py --target "${{ matrix.target }}" --object $object --library $library --output build/mojo-probe.json
-          pixi run python -c "import json; report=json.load(open('build/mojo-probe.json')); assert report['targets']['${{ matrix.target }}']['native']['executed'] is True"
-      - name: Build standalone archive (Unix)
-        if: runner.os != 'Windows'
-        run: pixi run python scripts/release/build_bundle.py --target ${{ matrix.target }} --output dist/${{ matrix.asset }} --version ${{ needs.verify-ci.outputs.version }} --commit ${{ needs.verify-ci.outputs.target_sha }} --mojo-library build/libmgesture_mojo.${{ runner.os == 'macOS' && 'dylib' || 'so' }}
-      - name: Build standalone archive (Windows)
-        if: runner.os == 'Windows'
-        run: pixi run python scripts/release/build_bundle.py --target ${{ matrix.target }} --output dist/${{ matrix.asset }} --version ${{ needs.verify-ci.outputs.version }} --commit ${{ needs.verify-ci.outputs.target_sha }} --mojo-library build/mgesture_mojo.dll
-      - name: Extract and execute clean-machine smoke (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/mgesture-clean"
-          tar -xzf "dist/${{ matrix.asset }}" -C "$RUNNER_TEMP/mgesture-clean"
-          pixi run python scripts/release/validate_mojo_source.py --root "$RUNNER_TEMP/mgesture-clean/mgesture"
-          pixi run python scripts/release/validate_architecture.py bundle --target "${{ matrix.target }}" --root "$RUNNER_TEMP/mgesture-clean/mgesture"
-          binary="$RUNNER_TEMP/mgesture-clean/mgesture/bin/mgesture"
-          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" --version
-          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" --help >/dev/null
-          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" self-test --headless --fake-input --engine mojo
-          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" doctor --runtime --json | tee "$RUNNER_TEMP/mgesture-doctor.json"
-          grep -F '"compiler_required": false' "$RUNNER_TEMP/mgesture-doctor.json"
-          grep -F '"active_engine": "mojo"' "$RUNNER_TEMP/mgesture-doctor.json"
-          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/mgesture-home" MGESTURE_BUNDLE_ROOT="$RUNNER_TEMP/mgesture-clean/mgesture" "$binary" replay --fixture "$RUNNER_TEMP/mgesture-clean/mgesture/share/mgesture/fixtures/basic.json" --engine mojo >/dev/null
-      - name: Verify reset preserves extracted application (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          bundle="$RUNNER_TEMP/mgesture-clean/mgesture"
-          binary="$bundle/bin/mgesture"
-          native="$bundle/runtime/mojo/libmgesture_mojo.so"
-          if [ "$RUNNER_OS" = "macOS" ]; then native="$bundle/runtime/mojo/libmgesture_mojo.dylib"; fi
-          bundle_parent="$(dirname "$bundle")"
-          reset_home="$RUNNER_TEMP/mgesture-reset-home"
-          mkdir -p "$reset_home"
-          env -i PATH=/usr/bin:/bin HOME="$reset_home" XDG_DATA_HOME="$bundle_parent" XDG_CONFIG_HOME="$reset_home/config" XDG_CACHE_HOME="$reset_home/cache" XDG_STATE_HOME="$reset_home/state" MGESTURE_BUNDLE_ROOT="$bundle" "$binary" --reset --yes
-          test -x "$binary"
-          test -f "$native"
-          env -i PATH=/usr/bin:/bin HOME="$reset_home" XDG_DATA_HOME="$bundle_parent" XDG_CONFIG_HOME="$reset_home/config" XDG_CACHE_HOME="$reset_home/cache" XDG_STATE_HOME="$reset_home/state" MGESTURE_BUNDLE_ROOT="$bundle" "$binary" --version
-          env -i PATH=/usr/bin:/bin HOME="$reset_home" XDG_DATA_HOME="$bundle_parent" XDG_CONFIG_HOME="$reset_home/config" XDG_CACHE_HOME="$reset_home/cache" XDG_STATE_HOME="$reset_home/state" MGESTURE_BUNDLE_ROOT="$bundle" "$binary" self-test --headless --fake-input --engine mojo >/dev/null
-      - name: Extract and execute clean-machine smoke (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $smoke = Join-Path $env:RUNNER_TEMP "mgesture-clean"
-          New-Item -ItemType Directory -Force -Path $smoke | Out-Null
-          Expand-Archive -LiteralPath "dist/${{ matrix.asset }}" -DestinationPath $smoke -Force
-          $bundle = Join-Path $smoke "mgesture"
-          $binary = Join-Path $bundle "bin\mgesture.exe"
-          pixi run python scripts/release/validate_mojo_source.py --root $bundle
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          pixi run python scripts/release/validate_architecture.py bundle --target "${{ matrix.target }}" --root $bundle
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:MGESTURE_BUNDLE_ROOT = $bundle
-          & $binary --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $binary --help | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $binary self-test --headless --fake-input --engine mojo
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $doctor = & $binary doctor --runtime --json | Out-String
-          if ($LASTEXITCODE -ne 0 -or ($doctor -notmatch '"compiler_required": false') -or ($doctor -notmatch '"active_engine": "mojo"')) { throw "standalone runtime diagnostics failed" }
-          & $binary replay --fixture (Join-Path $bundle "share\mgesture\fixtures\basic.json") --engine mojo | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Verify reset preserves extracted application (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $bundle = Join-Path $env:RUNNER_TEMP "mgesture-clean\mgesture"
-          $binary = Join-Path $bundle "bin\mgesture.exe"
-          $native = Join-Path $bundle "runtime\mojo\mgesture_mojo.dll"
-          $resetParent = Join-Path $env:RUNNER_TEMP "mgesture-reset-home"
-          New-Item -ItemType Directory -Force -Path $resetParent | Out-Null
-          $env:LOCALAPPDATA = $resetParent
-          $env:APPDATA = Join-Path $resetParent "roaming"
-          $env:MGESTURE_BUNDLE_ROOT = $bundle
-          & $binary --reset --yes
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path -LiteralPath $binary) -or -not (Test-Path -LiteralPath $native)) { throw "reset removed standalone application files" }
-          & $binary --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $binary self-test --headless --fake-input --engine mojo | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Upload standalone archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: standalone-${{ matrix.target }}
-          path: dist/${{ matrix.asset }}
-          if-no-files-found: error
 
   prepare:
     name: Prepare verified release assets
-    needs: [verify-ci, build]
+    needs: verify-ci
     runs-on: ubuntu-24.04
     permissions:
-      artifact-metadata: write
+      actions: read
       attestations: write
       contents: read
       id-token: write
@@ -294,20 +104,65 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.verify-ci.outputs.target_sha }}
+          fetch-depth: 1
           persist-credentials: false
-      - name: Download archives
+      - name: Download exact-SHA candidate archives
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: standalone-*
+          pattern: standalone-candidate-*
           path: release-assets
           merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.verify-ci.outputs.ci_run_id }}
+          digest-mismatch: error
+      - name: Validate six candidate archives
+        env:
+          VERSION: ${{ needs.verify-ci.outputs.version }}
+          TARGET_SHA: ${{ needs.verify-ci.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          test "$(find release-assets -maxdepth 1 -type f \( -name 'mgesture-*.tar.gz' -o -name 'mgesture-*.zip' \) | wc -l)" = 6
+          python3 - <<'PY'
+          import json
+          import os
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          expected = {
+              "mgesture-x86_64-unknown-linux-gnu.tar.gz",
+              "mgesture-aarch64-unknown-linux-gnu.tar.gz",
+              "mgesture-x86_64-apple-darwin.tar.gz",
+              "mgesture-aarch64-apple-darwin.tar.gz",
+              "mgesture-x86_64-pc-windows-msvc.zip",
+              "mgesture-aarch64-pc-windows-msvc.zip",
+          }
+          assets = {path.name for path in Path("release-assets").iterdir() if path.is_file()}
+          assert expected <= assets
+          for name in expected:
+              path = Path("release-assets") / name
+              if name.endswith(".zip"):
+                  with zipfile.ZipFile(path) as archive:
+                      member = next(item for item in archive.namelist() if item.endswith("share/mgesture/release-metadata.json"))
+                      metadata = json.loads(archive.read(member))
+              else:
+                  with tarfile.open(path, "r:gz") as archive:
+                      member = next(item for item in archive.getmembers() if item.name.endswith("share/mgesture/release-metadata.json"))
+                      handle = archive.extractfile(member)
+                      assert handle is not None
+                      metadata = json.load(handle)
+              assert metadata["version"] == os.environ["VERSION"], name
+              assert metadata["commit"] == os.environ["TARGET_SHA"], name
+              assert metadata["target"] in name, name
+          PY
       - name: Set up Pixi for metadata and SBOM
         uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
           pixi-version: v0.77.1
           cache: true
-      - name: Install metadata environment
-        run: pixi install --locked
+          cache-key: mgesture-pixi-0.77.1-x86_64-unknown-linux-gnu-standard-${{ hashFiles('pixi.toml', 'pyproject.toml') }}-
+          cache-write: false
       - name: Prepare manifest, SBOM, and checksums
         env:
           VERSION: ${{ needs.verify-ci.outputs.version }}
@@ -339,6 +194,7 @@ jobs:
           name: verified-release-assets
           path: release-assets
           if-no-files-found: error
+          compression-level: 0
 
   publish:
     name: Publish GitHub Release
@@ -351,6 +207,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.verify-ci.outputs.target_sha }}
+          fetch-depth: 1
           persist-credentials: false
       - name: Download verified assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

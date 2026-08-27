@@ -47,6 +47,10 @@ Python defines gesture semantics. Mojo mirrors those semantics and is accepted o
 - `config.reset_user_data()` is the sole owner of user-state deletion and may delete only an allowlist of canonical mutable paths; installation roots, executables, release directories, bundled runtimes, models, and active metadata are protected.
 - `release.py` owns release resolution and update decisions; `install.sh` and `install.ps1` own download, verification, staging, self-test, and activation. Update preserves user state; reset preserves application files.
 - Every standalone release must exercise `--reset` and prove the packaged executable remains usable afterward.
+- CI keeps six Python and six Mojo target jobs, but platform-independent checks belong to one quality owner rather than being repeated in every lane.
+- Pixi caches may accelerate lockfile-resolved environments only when keys separate target, architecture, lockfile, and native build flags; cache misses must remain correct.
+- Main CI may publish exact-SHA candidate bundles for release reuse. Release workflows must verify their run, SHA, version, target, and embedded metadata before retaining all final security checks.
+- Never remove reset, updater, architecture, Mojo ABI, standalone smoke, checksum, SBOM, provenance, or malware validation to reduce wall-clock time.
 
 ## Reuse-first rule
 
